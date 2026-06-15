@@ -32,7 +32,7 @@ jobs:
           executed="$(sed -E 's/.*Executed ([0-9]+) tests?.*/\1/' <<<"$summary")"
           failures="$(sed -E 's/.*with ([0-9]+) failures?.*/\1/' <<<"$summary")"
           if [[ "$failures" == "$summary" ]]; then failures=0; fi
-          skipped="$(grep -Eo '[0-9]+ tests? skipped' test-results.log | tail -1 | awk '{print $1}')"
+          skipped="$(grep -Eo '[0-9]+ tests? skipped' test-results.log | tail -1 | awk '{print $1}' || true)"
           skipped="${skipped:-0}"
           echo "Executed tests: $executed"
           echo "Failed tests: $failures"
