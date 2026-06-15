@@ -18,6 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Print toolchain
         run: |
+          sw_vers
           echo "Developer directory: $(xcode-select -p)"
           xcodebuild -version
           swift --version
@@ -34,7 +35,9 @@ jobs:
           if [[ "$failures" == "$summary" ]]; then failures=0; fi
           skipped="$(grep -Eo '[0-9]+ tests? skipped' test-results.log | tail -1 | awk '{print $1}' || true)"
           skipped="${skipped:-0}"
+          passed=$((executed - failures - skipped))
           echo "Executed tests: $executed"
+          echo "Passed tests: $passed"
           echo "Failed tests: $failures"
           echo "Skipped tests: $skipped"
           if (( executed < 47 )); then
@@ -86,6 +89,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Print toolchain
         run: |
+          sw_vers
           xcodebuild -version
           swift --version
           echo "macOS SDK: $(xcrun --sdk macosx --show-sdk-version)"
