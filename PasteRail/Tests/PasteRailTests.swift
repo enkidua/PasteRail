@@ -54,7 +54,8 @@ final class PasteRailTests: XCTestCase {
         let updatedBuildStore = try ClipStore(rootURL: root, keyStore: stableKeyStore)
         let updatedRecords = await updatedBuildStore.records()
         let reopenedRecord = try XCTUnwrap(updatedRecords.first)
-        XCTAssertEqual(try await updatedBuildStore.loadPayload(for: reopenedRecord), payload)
+        let reopenedPayload = try await updatedBuildStore.loadPayload(for: reopenedRecord)
+        XCTAssertEqual(reopenedPayload, payload)
 
         XCTAssertThrowsError(try ClipStore(rootURL: root, keyStore: MemoryKeyStore(byte: 0x33)))
         XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("history.enc")), encryptedIndexBeforeUpdate)
@@ -197,6 +198,7 @@ final class PasteRailTests: XCTestCase {
         XCTAssertEqual(afterRecovery, second.id)
     }
 
+    @MainActor
     func testMultiplePasteboardItemsArePreserved() {
         let board = NSPasteboard.withUniqueName()
         let first = NSPasteboardItem()
@@ -250,6 +252,7 @@ final class PasteRailTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: payloadDirectory.appendingPathComponent(payloadName + ".enc").path))
     }
 
+    @MainActor
     func testURLAndRTFSearchMetadata() {
         let urlBoard = NSPasteboard.withUniqueName()
         urlBoard.setString("https://example.invalid/path", forType: .URL)
@@ -263,6 +266,7 @@ final class PasteRailTests: XCTestCase {
         XCTAssertEqual(PasteboardMonitor.capture(from: rtfBoard)?.searchText, "hello")
     }
 
+    @MainActor
     func testPNGJPEGAndTIFFCapture() throws {
         let image = NSImage(size: NSSize(width: 8, height: 6))
         image.lockFocus()
@@ -287,6 +291,7 @@ final class PasteRailTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testFileURLCapture() throws {
         let board = NSPasteboard.withUniqueName()
         let item = NSPasteboardItem()
@@ -400,10 +405,13 @@ final class PasteRailTests: XCTestCase {
         let environment = DelegatingPasteEnvironment(system: system)
         let service = PasteService(environment: environment, ownBundleIdentifier: "io.pasterail.PasteRail")
 
-        XCTAssertEqual(
-            await service.paste(textPayload("new"), asPlainText: false, target: environment.frontmostTarget, dismissPanel: {}),
-            .eventSent
+        let result = await service.paste(
+            textPayload("new"),
+            asPlainText: false,
+            target: environment.frontmostTarget,
+            dismissPanel: {}
         )
+        XCTAssertEqual(result, .eventSent)
         XCTAssertFalse(system.hasPreviousClipboardSnapshot)
     }
 
@@ -422,16 +430,22 @@ final class PasteRailTests: XCTestCase {
         let environment = DelegatingPasteEnvironment(system: system)
         let service = PasteService(environment: environment, ownBundleIdentifier: "io.pasterail.PasteRail")
 
-        XCTAssertEqual(
-            await service.paste(textPayload("first"), asPlainText: false, target: environment.frontmostTarget, dismissPanel: {}),
-            .eventSent
+        let firstResult = await service.paste(
+            textPayload("first"),
+            asPlainText: false,
+            target: environment.frontmostTarget,
+            dismissPanel: {}
         )
+        XCTAssertEqual(firstResult, .eventSent)
         access.items = between
         environment.sendSucceeds = false
-        XCTAssertEqual(
-            await service.paste(textPayload("second"), asPlainText: false, target: environment.frontmostTarget, dismissPanel: {}),
-            .eventFailedPreviousRestored
+        let secondResult = await service.paste(
+            textPayload("second"),
+            asPlainText: false,
+            target: environment.frontmostTarget,
+            dismissPanel: {}
         )
+        XCTAssertEqual(secondResult, .eventFailedPreviousRestored)
         XCTAssertEqual(access.items, between)
         XCTAssertFalse(system.hasPreviousClipboardSnapshot)
     }
@@ -626,6 +640,7 @@ final class PasteRailTests: XCTestCase {
         XCTAssertEqual(captures, 0)
     }
 
+    @MainActor
     func testProtectedTypeOnSecondItemRejectsWholePasteboard() {
         let board = NSPasteboard.withUniqueName()
         let first = NSPasteboardItem()
