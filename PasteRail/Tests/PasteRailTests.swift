@@ -625,7 +625,9 @@ final class PasteRailTests: XCTestCase {
         var source: SourceApplication?
         let monitor = PasteboardMonitor(pasteboard: board, initialSource: previous, usesSystemInitialSource: false) { _, _, _, _, app in source = app }
         monitor.handleActivation(current)
-        board.setString("new", forType: .string)
+        let item = NSPasteboardItem()
+        item.setString("new", forType: .string)
+        board.writeObjects([item])
         monitor.handleActivation(current)
         XCTAssertEqual(source, current)
     }
