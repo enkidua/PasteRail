@@ -1,0 +1,27 @@
+name: CodeQL
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "31 4 * * 1"
+
+jobs:
+  analyze:
+    runs-on: macos-15
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select installed stable Xcode
+        run: |
+          selected="$(ls -dt /Applications/Xcode*.app | head -1)"
+          sudo xcode-select --switch "$selected/Contents/Developer"
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: swift
+          build-mode: manual
+      - name: Build PasteRail
+        run: swift build -c release
+      - uses: github/codeql-action/analyze@v3

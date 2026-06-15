@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_keychain_tests:
+        description: Run opt-in Keychain integration tests
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  test-and-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print toolchain
+        run: |
+          echo "Developer directory: $(xcode-select -p)"
+          xcodebuild -version
+          swift --version
+          echo "macOS SDK: $(xcrun --sdk macosx --show-sdk-version)"
+      - name: Run ordinary tests and enforce count
+        shell: bash
+        run: |
+          set -o pipefail
+          swift test --filter PasteRailTests 2>&1 | tee test-results.log
+          summary="$(grep -E 'Executed [0-9]+ tests?' test-results.log | tail -1)"
+          test -n "$summary"
+          executed="$(sed -E 's/.*Executed ([0-9]+) tests?.*/\1/' <<<"$summary")"
+          failures="$(sed -E 's/.*with ([0-9]+) failures?.*/\1/' <<<"$summary")"
+          if [[ "$failures" == "$summary" ]]; then failures=0; fi
+          skipped="$(grep -Eo '[0-9]+ tests? skipped' test-results.log | tail -1 | awk '{print $1}')"
+          skipped="${skipped:-0}"
+          echo "Executed tests: $executed"
+          echo "Failed tests: $failures"
+          echo "Skipped tests: $skipped"
+          if (( executed < 47 )); then
+            echo "Expected at least 47 ordinary tests, but only $executed executed."
+            exit 1
+          fi
+          if (( failures > 0 )); then exit 1; fi
+      - name: Debug build
+        run: swift build -c debug
+      - name: Release build
+        run: swift build -c release
+      - name: Build Universal 2 app
+        run: ./Scripts/build-universal.sh
+      - name: Verify application
+        run: |
+          binary=".build/universal/PasteRail.app/Contents/MacOS/PasteRail"
+          lipo "$binary" -verify_arch arm64 x86_64
+          lipo -info "$binary"
+          codesign --verify --deep --strict --verbose=2 ".build/universal/PasteRail.app"
+          test "$(defaults read "$PWD/.build/universal/PasteRail.app/Contents/Info" CFBundleIdentifier)" = "io.pasterail.PasteRail"
+      - name: Package Universal app
+        run: |
+          rm -f PasteRail-0.1.0-universal.zip
+          ditto -c -k --sequesterRsrc --keepParent \
+            ".build/universal/PasteRail.app" \
+            "PasteRail-0.1.0-universal.zip"
+      - name: Upload Universal app
+        uses: actions/upload-artifact@v4
+        with:
+          name: PasteRail-0.1.0-universal
+          path: PasteRail-0.1.0-universal.zip
+          if-no-files-found: error
+      - name: Reject legacy brands and prohibited integrations
+        run: |
+          legacy_a="$(printf '\103\154\151\160\171')"
+          legacy_b="$(printf '\106\151\162\145\142\141\163\145')"
+          legacy_c="$(printf '\123\160\141\162\153\154\145')"
+          legacy_d="$(printf '\122\145\141\154\155')"
+          ! git grep -I -n -e "$legacy_a" -e "$legacy_b" -e "$legacy_c" -e "$legacy_d" -- ':!.github/workflows/CI.yml'
+          test ! -e .github/FUNDING.yml
+      - name: Reject network APIs and remote URLs in product code
+        run: |
+          ! git grep -I -n -e 'URLSession' -e 'Network.framework' -e 'https://' -e 'http://' -- Package.swift PasteRail/Sources Scripts
+
+  keychain-integration:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_keychain_tests }}
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          echo "macOS SDK: $(xcrun --sdk macosx --show-sdk-version)"
+      - name: Run Keychain integration test
+        env:
+          PASTERAIL_RUN_KEYCHAIN_TESTS: "1"
+        run: swift test --filter KeychainIntegrationTests

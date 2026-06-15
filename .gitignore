@@ -1,0 +1,11 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+build/
+xcuserdata/
+*.dSYM
+*.dSYM.zip
+*.xcuserstate
+PasteRail-*-source.zip
+PasteRail-*-universal.zip
