@@ -74,6 +74,60 @@ final class PasteRailTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
+    @MainActor
+    func testHistoryFilterCombinesWithSearch() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        _ = try await store.capture(
+            payload: textPayload("alpha text"),
+            kind: .text,
+            title: "alpha text",
+            searchText: "alpha text",
+            sourceAppName: "TextEdit",
+            sourceBundleIdentifier: nil
+        )
+        _ = try await store.capture(
+            payload: textPayload("https://alpha.example"),
+            kind: .url,
+            title: "https://alpha.example",
+            searchText: "https://alpha.example",
+            sourceAppName: "Safari",
+            sourceBundleIdentifier: nil
+        )
+        let model = AppModel(store: store, defaults: try isolatedDefaults())
+        await model.reload()
+        model.searchText = "alpha"
+        model.filter = .link
+        XCTAssertEqual(model.filteredRecords.map(\.kind), [.url])
+        model.filter = .text
+        XCTAssertEqual(model.filteredRecords.map(\.kind), [.text])
+    }
+
+    @MainActor
+    func testKeyboardFocusMovementFollowsVisibleHistoryOrder() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        for index in 0..<15 {
+            let text = "focus \(index)"
+            _ = try await store.capture(
+                payload: textPayload(text),
+                kind: .text,
+                title: text,
+                searchText: text,
+                sourceAppName: nil,
+                sourceBundleIdentifier: nil
+            )
+        }
+        let model = AppModel(store: store, defaults: try isolatedDefaults())
+        await model.reload()
+        model.moveFocus(.last)
+        XCTAssertEqual(model.focusedRecordID, model.filteredRecords.last?.id)
+        model.moveFocus(.pageUp)
+        XCTAssertEqual(model.focusedRecordID, model.filteredRecords[4].id)
+        model.moveFocus(.first)
+        XCTAssertEqual(model.focusedRecordID, model.filteredRecords.first?.id)
+        model.moveFocus(.next)
+        XCTAssertEqual(model.focusedRecordID, model.filteredRecords[1].id)
+    }
+
     func testFIFOQueueKeepsTwentyItemOrder() async throws {
         let store = try ClipStore(rootURL: root, keyStore: keyStore)
         var ids: [UUID] = []
@@ -790,6 +844,13 @@ final class PasteRailTests: XCTestCase {
 
     private func textPayload(_ text: String) -> ClipPayload {
         ClipPayload(items: [[.init(pasteboardType: NSPasteboard.PasteboardType.string.rawValue, data: Data(text.utf8))]])
+    }
+
+    private func isolatedDefaults() throws -> UserDefaults {
+        let suiteName = "io.pasterail.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
     }
 }
 

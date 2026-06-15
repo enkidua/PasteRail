@@ -29,6 +29,41 @@ enum ClipKind: String, Codable, CaseIterable, Sendable {
     }
 }
 
+enum ClipFilter: String, CaseIterable, Identifiable {
+    case all
+    case text
+    case image
+    case link
+    case file
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all: "All"
+        case .text: "Text"
+        case .image: "Images"
+        case .link: "Links"
+        case .file: "Files"
+        }
+    }
+
+    func includes(_ kind: ClipKind) -> Bool {
+        switch self {
+        case .all:
+            true
+        case .text:
+            kind == .text || kind == .richText
+        case .image:
+            kind == .image
+        case .link:
+            kind == .url
+        case .file:
+            kind == .file
+        }
+    }
+}
+
 struct ClipPayload: Codable, Equatable, Sendable {
     struct Representation: Codable, Equatable, Sendable {
         let pasteboardType: String

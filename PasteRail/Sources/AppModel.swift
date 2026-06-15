@@ -3,21 +3,32 @@ import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
+    private static let filterDefaultsKey = "PasteRail.HistoryFilter"
+
     @Published private(set) var records: [ClipRecord] = []
     @Published private(set) var queue: [QueueEntry] = []
     @Published private(set) var queueIndex = 0
     @Published var searchText = ""
     @Published var selection: Set<UUID> = []
+    @Published var focusedRecordID: UUID?
+    @Published var filter: ClipFilter {
+        didSet { defaults.set(filter.rawValue, forKey: Self.filterDefaultsKey) }
+    }
     @Published var errorMessage: String?
     @Published private(set) var targetApplication: PasteTarget?
 
     let store: ClipStore
     let pasteEnvironment: SystemPasteEnvironment
     let pasteService: PasteService
+    private let defaults: UserDefaults
     private(set) var monitor: PasteboardMonitor!
 
-    init(store: ClipStore) {
+    init(store: ClipStore, defaults: UserDefaults = .standard) {
         self.store = store
+        self.defaults = defaults
+        filter = ClipFilter(
+            rawValue: defaults.string(forKey: Self.filterDefaultsKey) ?? ""
+        ) ?? .all
         pasteEnvironment = SystemPasteEnvironment()
         pasteService = PasteService(environment: pasteEnvironment)
         pasteEnvironment.didWritePasteboard = { [weak self] in self?.monitor.markInternalWrite() }
@@ -43,12 +54,18 @@ final class AppModel: ObservableObject {
 
     var filteredRecords: [ClipRecord] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return records }
-        return records.filter {
-            $0.title.localizedCaseInsensitiveContains(query)
-                || $0.searchText.localizedCaseInsensitiveContains(query)
-                || ($0.sourceAppName?.localizedCaseInsensitiveContains(query) ?? false)
+        return records.filter { record in
+            guard filter.includes(record.kind) else { return false }
+            guard !query.isEmpty else { return true }
+            return record.title.localizedCaseInsensitiveContains(query)
+                || record.searchText.localizedCaseInsensitiveContains(query)
+                || (record.sourceAppName?.localizedCaseInsensitiveContains(query) ?? false)
         }
+    }
+
+    var focusedRecord: ClipRecord? {
+        guard let focusedRecordID else { return filteredRecords.first }
+        return filteredRecords.first { $0.id == focusedRecordID }
     }
 
     func start() {
@@ -70,6 +87,61 @@ final class AppModel: ObservableObject {
         let state = await store.queueState()
         queue = state.0
         queueIndex = state.1
+        normalizeFocusedRecord()
+    }
+
+    func moveFocus(_ movement: FocusMovement) {
+        let visible = filteredRecords
+        guard !visible.isEmpty else {
+            focusedRecordID = nil
+            return
+        }
+        let currentIndex = focusedRecordID.flatMap { id in visible.firstIndex { $0.id == id } } ?? 0
+        let target: Int
+        switch movement {
+        case .previous:
+            target = max(0, currentIndex - 1)
+        case .next:
+            target = min(visible.count - 1, currentIndex + 1)
+        case .pageUp:
+            target = max(0, currentIndex - 10)
+        case .pageDown:
+            target = min(visible.count - 1, currentIndex + 10)
+        case .first:
+            target = 0
+        case .last:
+            target = visible.count - 1
+        }
+        focusedRecordID = visible[target].id
+    }
+
+    func pasteFocused(plainText: Bool, dismissPanel: @escaping () -> Void) {
+        guard let record = focusedRecord else { return }
+        paste(record, plainText: plainText, dismissPanel: dismissPanel)
+    }
+
+    func isQueued(_ record: ClipRecord) -> Bool {
+        queue.contains { $0.clipID == record.id }
+    }
+
+    func toggleQueueSelection(_ id: UUID) {
+        if selection.contains(id) {
+            selection.remove(id)
+        } else {
+            selection.insert(id)
+        }
+        focusedRecordID = id
+    }
+
+    func focus(_ id: UUID) {
+        focusedRecordID = id
+    }
+
+    private func normalizeFocusedRecord() {
+        if let focusedRecordID, filteredRecords.contains(where: { $0.id == focusedRecordID }) {
+            return
+        }
+        focusedRecordID = filteredRecords.first?.id
     }
 
     func paste(_ record: ClipRecord, plainText: Bool = false, dismissPanel: @escaping () -> Void) {
@@ -173,4 +245,13 @@ final class AppModel: ObservableObject {
     func thumbnail(for record: ClipRecord) async -> NSImage? {
         await store.thumbnail(for: record)
     }
+}
+
+enum FocusMovement {
+    case previous
+    case next
+    case pageUp
+    case pageDown
+    case first
+    case last
 }

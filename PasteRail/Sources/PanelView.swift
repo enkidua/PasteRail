@@ -10,26 +10,16 @@ struct PanelView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            HSplitView {
-                List(model.filteredRecords, selection: $model.selection) { record in
-                    ClipRow(model: model, record: record)
-                        .tag(record.id)
-                        .contentShape(Rectangle())
-                        .onTapGesture(count: 2) { model.paste(record, dismissPanel: dismiss) }
-                }
-                .listStyle(.inset)
-                .frame(minWidth: 410)
-
-                detail
-                    .frame(minWidth: 260, idealWidth: 310)
-            }
+            historyList
             Divider()
             queueBar
         }
-        .frame(minWidth: 640, minHeight: 420)
-        .background(.regularMaterial)
+        .frame(minWidth: 620, minHeight: 420)
+        .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { searchFocused = true }
         .onExitCommand(perform: dismiss)
+        .onChange(of: model.filter) { _ in ensureVisibleFocus() }
+        .onChange(of: model.searchText) { _ in ensureVisibleFocus() }
         .alert("PasteRail", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
@@ -41,79 +31,87 @@ struct PanelView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "railway")
-                .font(.title2)
-            TextField("Search clipboard history", text: $model.searchText)
-                .textFieldStyle(.roundedBorder)
-                .focused($searchFocused)
-            Button("Queue") { model.addSelectionToQueue() }
-                .disabled(model.selection.isEmpty)
-            Button("Plain Queue") { model.addSelectionToQueue(plainText: true) }
-                .disabled(model.selection.isEmpty)
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: "railway")
+                    .font(.title2)
+                TextField("Search clipboard history", text: $model.searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($searchFocused)
+                Button("Queue Selected") { model.addSelectionToQueue() }
+                    .disabled(model.selection.isEmpty)
+                Button("Plain Text Queue") { model.addSelectionToQueue(plainText: true) }
+                    .disabled(model.selection.isEmpty)
+            }
+            Picker("History type", selection: $model.filter) {
+                ForEach(ClipFilter.allCases) { filter in
+                    Text(filter.label).tag(filter)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
         }
         .padding(12)
     }
 
-    @ViewBuilder
-    private var detail: some View {
-        if let id = model.selection.first,
-           let record = model.records.first(where: { $0.id == id }) {
-            VStack(alignment: .leading, spacing: 14) {
-                Label(record.kind.label, systemImage: record.kind.symbol)
-                    .font(.headline)
-                if record.kind == .image {
-                    AsyncImageView(model: model, record: record)
-                } else {
-                    ScrollView {
-                        Text(record.isSensitive ? "Sensitive content" : record.title)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+    private var historyList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    if model.filteredRecords.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "clipboard")
+                                .font(.largeTitle)
+                                .foregroundStyle(.secondary)
+                            Text("No Clipboard History")
+                                .font(.headline)
+                            Text("Copy something or change the current search and filter.")
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 260)
+                    } else {
+                        ForEach(model.filteredRecords) { record in
+                            ClipRow(
+                                model: model,
+                                record: record,
+                                isFocused: model.focusedRecordID == record.id,
+                                isSelectedForQueue: model.selection.contains(record.id),
+                                isQueued: model.isQueued(record)
+                            )
+                            .id(record.id)
+                            .onTapGesture {
+                                model.focus(record.id)
+                                model.paste(record, dismissPanel: dismiss)
+                            }
+                            Divider()
+                        }
                     }
                 }
-                Spacer()
-                Text(record.sourceAppName ?? "Unknown application")
-                    .foregroundStyle(.secondary)
-                Text(record.createdAt.formatted())
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Button("Paste") {
-                        model.paste(record, dismissPanel: dismiss)
-                    }
-                    .keyboardShortcut(.return, modifiers: [])
-                    Button("Paste Plain") {
-                        model.paste(record, plainText: true, dismissPanel: dismiss)
-                    }
-                    .disabled(record.searchText.isEmpty)
+            }
+            .onChange(of: model.focusedRecordID) { id in
+                guard let id else { return }
+                withAnimation(.easeOut(duration: 0.12)) {
+                    proxy.scrollTo(id, anchor: .center)
                 }
             }
-            .padding(16)
-        } else {
-            VStack(spacing: 10) {
-                Image(systemName: "clipboard")
-                    .font(.largeTitle)
-                    .foregroundStyle(.secondary)
-                Text("Select an item")
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
     private var queueBar: some View {
-        HStack {
+        HStack(spacing: 8) {
             Label(
-                model.queue.isEmpty ? "Queue empty" : "Queue \(min(model.queueIndex + 1, model.queue.count)) of \(model.queue.count)",
+                model.queue.isEmpty
+                    ? "Queue empty"
+                    : "\(min(model.queueIndex + 1, model.queue.count)) / \(model.queue.count)",
                 systemImage: "list.number"
             )
-            Spacer()
+            .frame(minWidth: 90, alignment: .leading)
             if let current = queueRecord(at: model.queueIndex) {
-                Text("Current: \(current.title)")
+                Text("Current: \(current.isSensitive ? "Sensitive content" : current.title)")
                     .lineLimit(1)
             }
             if let next = queueRecord(at: model.queueIndex + 1) {
-                Text("Next: \(next.title)")
+                Text("Next: \(next.isSensitive ? "Sensitive content" : next.title)")
                     .lineLimit(1)
                     .foregroundStyle(.secondary)
             }
@@ -129,6 +127,7 @@ struct PanelView: View {
             Button("Clear") { model.clearQueue() }
                 .disabled(model.queue.isEmpty)
         }
+        .controlSize(.small)
         .padding(10)
     }
 
@@ -137,51 +136,123 @@ struct PanelView: View {
         let id = model.queue[index].clipID
         return model.records.first { $0.id == id }
     }
+
+    private func ensureVisibleFocus() {
+        if !model.filteredRecords.contains(where: { $0.id == model.focusedRecordID }) {
+            model.focusedRecordID = model.filteredRecords.first?.id
+        }
+    }
 }
 
 private struct ClipRow: View {
     let model: AppModel
     let record: ClipRecord
+    let isFocused: Bool
+    let isSelectedForQueue: Bool
+    let isQueued: Bool
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: record.kind.symbol)
-                .frame(width: 24)
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(record.isSensitive ? "Sensitive content" : record.title)
-                    .lineLimit(2)
-                HStack {
-                    Text(record.sourceAppName ?? "Unknown")
+            Button {
+                model.toggleQueueSelection(record.id)
+            } label: {
+                Image(systemName: isSelectedForQueue ? "checkmark.square.fill" : "square")
+                    .font(.title3)
+            }
+            .buttonStyle(.plain)
+            .help("Select for queue")
+
+            preview
+                .frame(width: 58, height: 46)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(displayTitle)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if record.isPinned {
+                        Image(systemName: "pin.fill")
+                            .accessibilityLabel("Pinned")
+                    }
+                    if isQueued {
+                        Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                            .accessibilityLabel("In paste queue")
+                    }
+                }
+                HStack(spacing: 8) {
+                    Text(record.kind.label)
+                    Text(record.sourceAppName ?? "Unknown application")
                     Text(record.createdAt, style: .relative)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+        .background(isFocused ? Color.accentColor.opacity(0.16) : Color.clear)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(record.isSensitive ? "\(record.kind.label), Sensitive content" : "\(record.kind.label), \(record.title)")
+        .accessibilityLabel(accessibilityTitle)
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        if record.kind == .image {
+            ThumbnailView(model: model, record: record)
+        } else {
+            Image(systemName: record.kind.symbol)
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+    }
+
+    private var displayTitle: String {
+        if record.isSensitive { return "Sensitive content" }
+        if record.kind == .file {
+            return URL(fileURLWithPath: record.title).lastPathComponent
+        }
+        return record.title
+    }
+
+    private var accessibilityTitle: String {
+        record.isSensitive
+            ? "\(record.kind.label), Sensitive content"
+            : "\(record.kind.label), \(displayTitle)"
     }
 }
 
-private struct AsyncImageView: View {
+private struct ThumbnailView: View {
     let model: AppModel
     let record: ClipRecord
     @State private var image: NSImage?
+    @State private var failed = false
 
     var body: some View {
-        Group {
+        ZStack {
+            Color(nsColor: .controlBackgroundColor)
             if let image {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
+            } else if failed {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Image preview unavailable")
             } else {
                 ProgressView()
+                    .controlSize(.small)
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: 6))
         .task(id: record.id) {
             image = await model.thumbnail(for: record)
+            failed = image == nil
         }
     }
 }

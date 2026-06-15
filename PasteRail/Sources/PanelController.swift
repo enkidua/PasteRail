@@ -6,6 +6,7 @@ final class PanelController: NSWindowController, NSWindowDelegate {
     private let model: AppModel
     private let defaults: UserDefaults
     private var isProgrammaticMove = false
+    private var keyMonitor: Any?
 
     init(model: AppModel, defaults: UserDefaults = .standard) {
         self.model = model
@@ -26,10 +27,19 @@ final class PanelController: NSWindowController, NSWindowDelegate {
         panel.contentViewController = NSHostingController(rootView: PanelView(model: model) {
             panel.orderOut(nil)
         })
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handleKeyEvent(event) == true ? nil : event
+        }
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+        }
     }
 
     func toggle() {
@@ -75,5 +85,33 @@ final class PanelController: NSWindowController, NSWindowDelegate {
     private func positionKey(for screen: NSScreen) -> String {
         let frame = screen.frame
         return "PasteRail.Panel.\(screen.localizedName).\(Int(frame.origin.x)).\(Int(frame.origin.y)).\(Int(frame.width))x\(Int(frame.height))"
+    }
+
+    private func handleKeyEvent(_ event: NSEvent) -> Bool {
+        guard window?.isKeyWindow == true else { return false }
+        switch event.keyCode {
+        case 53:
+            dismissPanel()
+        case 126:
+            model.moveFocus(.previous)
+        case 125:
+            model.moveFocus(.next)
+        case 116:
+            model.moveFocus(.pageUp)
+        case 121:
+            model.moveFocus(.pageDown)
+        case 115:
+            model.moveFocus(.first)
+        case 119:
+            model.moveFocus(.last)
+        case 36, 76:
+            model.pasteFocused(
+                plainText: event.modifierFlags.contains(.shift),
+                dismissPanel: { [weak self] in self?.dismissPanel() }
+            )
+        default:
+            return false
+        }
+        return true
     }
 }
