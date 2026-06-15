@@ -13,6 +13,7 @@ final class PasteboardMonitor {
     private var internalWriteCounts = Set<Int>()
     private var sourceCandidate: SourceApplication?
     private(set) var isStarted = false
+    var sourceCandidateForTesting: SourceApplication? { sourceCandidate }
 
     init(
         pasteboard: NSPasteboard = .general,

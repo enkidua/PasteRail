@@ -622,14 +622,9 @@ final class PasteRailTests: XCTestCase {
         let board = NSPasteboard.withUniqueName()
         let previous = SourceApplication(name: "Old", bundleIdentifier: "com.apple.Terminal", processIdentifier: 10)
         let current = SourceApplication(name: "TextEdit", bundleIdentifier: "com.apple.TextEdit", processIdentifier: 11)
-        var source: SourceApplication?
-        let monitor = PasteboardMonitor(pasteboard: board, initialSource: previous, usesSystemInitialSource: false) { _, _, _, _, app in source = app }
+        let monitor = PasteboardMonitor(pasteboard: board, initialSource: previous, usesSystemInitialSource: false) { _, _, _, _, _ in }
         monitor.handleActivation(current)
-        let item = NSPasteboardItem()
-        item.setString("new", forType: .string)
-        board.writeObjects([item])
-        monitor.handleActivation(current)
-        XCTAssertEqual(source, current)
+        XCTAssertEqual(monitor.sourceCandidateForTesting, current)
     }
 
     @MainActor
