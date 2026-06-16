@@ -8,9 +8,12 @@ enum ClipStoreFileOperation: Equatable, Sendable {
     case beforeBackupReplace
     case beforeIndexWrite
     case afterCleanupValidation
+    case beforeHistoryLimitPersist
 }
 
 actor ClipStore {
+    static let maximumStoredRecords = 100
+
     private struct BootstrapResult {
         var snapshot: Snapshot
         let recoveryMessage: String?
@@ -47,6 +50,7 @@ actor ClipStore {
         case invalidImage
         case corruptIndex(URL)
         case encryptionUnavailable
+        case historyLimitReached
     }
 
     struct Snapshot: Codable, Equatable {
@@ -209,6 +213,23 @@ actor ClipStore {
                 fileOperationInjector: fileOperationInjector
             )
         }
+        if snapshot.records.count > maximumStoredRecords {
+            var limited = snapshot
+            let removed = try applyHistoryLimit(to: &limited)
+            if !removed.isEmpty {
+                try fileOperationInjector?(.beforeHistoryLimitPersist)
+                try persistSnapshot(
+                    limited,
+                    indexURL: indexURL,
+                    backupURL: backupURL,
+                    crypto: crypto,
+                    persistenceFailureInjector: persistenceFailureInjector,
+                    fileOperationInjector: fileOperationInjector
+                )
+                deleteFiles(for: removed, payloadsURL: payloadsURL, imagesURL: imagesURL, thumbnailsURL: thumbnailsURL)
+                snapshot = limited
+            }
+        }
 
         do {
             try completePendingPlaintextCleanup(
@@ -360,6 +381,10 @@ actor ClipStore {
             performanceMetrics.lastDuplicateDuration = CFAbsoluteTimeGetCurrent() - duplicateStarted
             return existing
         }
+        if snapshot.records.count >= Self.maximumStoredRecords,
+           !snapshot.records.contains(where: { !$0.isPinned }) {
+            throw StoreError.historyLimitReached
+        }
 
         let id = UUID()
         let payloadName = "\(id.uuidString).json"
@@ -399,11 +424,12 @@ actor ClipStore {
             isSensitive: false,
             isPinned: false
         )
+        let previousSnapshot = snapshot
         snapshot.records.insert(record, at: 0)
         digestLookup[digest] = id
-        let saveStarted = CFAbsoluteTimeGetCurrent()
+        var recordsToDelete: [ClipRecord] = []
         do {
-            try persist()
+            recordsToDelete = try Self.applyHistoryLimit(to: &snapshot)
         } catch {
             snapshot.records.removeAll { $0.id == id }
             digestLookup.removeValue(forKey: digest)
@@ -412,6 +438,21 @@ actor ClipStore {
             if let thumbnailName { try? FileManager.default.removeItem(at: thumbnailsURL.appendingPathComponent(thumbnailName)) }
             throw error
         }
+        let saveStarted = CFAbsoluteTimeGetCurrent()
+        do {
+            if !recordsToDelete.isEmpty {
+                try fileOperationInjector?(.beforeHistoryLimitPersist)
+            }
+            try persist()
+        } catch {
+            snapshot = previousSnapshot
+            rebuildDigestLookup()
+            try? FileManager.default.removeItem(at: payloadURL)
+            if let imageName { try? FileManager.default.removeItem(at: imagesURL.appendingPathComponent(imageName)) }
+            if let thumbnailName { try? FileManager.default.removeItem(at: thumbnailsURL.appendingPathComponent(thumbnailName)) }
+            throw error
+        }
+        deleteFiles(for: recordsToDelete)
         performanceMetrics.lastSaveDuration = CFAbsoluteTimeGetCurrent() - saveStarted
         return record
     }
@@ -421,11 +462,25 @@ actor ClipStore {
         return try JSONDecoder.pasteRail.decode(ClipPayload.self, from: data)
     }
 
-    func thumbnail(for record: ClipRecord) -> NSImage? {
+    func thumbnailData(for record: ClipRecord) -> Data? {
         guard let name = record.thumbnailFile else { return nil }
         guard let encrypted = try? Data(contentsOf: thumbnailsURL.appendingPathComponent(name)),
               let data = try? crypto.open(encrypted) else { return nil }
-        return NSImage(data: data)
+        return data
+    }
+
+    func setPinned(_ id: UUID, pinned: Bool) throws {
+        guard let index = snapshot.records.firstIndex(where: { $0.id == id }) else {
+            throw StoreError.missingRecord
+        }
+        let previous = snapshot.records[index].isPinned
+        snapshot.records[index].isPinned = pinned
+        do {
+            try persist()
+        } catch {
+            snapshot.records[index].isPinned = previous
+            throw error
+        }
     }
 
     func enqueue(_ clipIDs: [UUID], plainText: Bool = false) throws {
@@ -500,6 +555,60 @@ actor ClipStore {
     private func atomicWrite(_ data: Data, to url: URL) throws {
         try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    private static func applyHistoryLimit(to snapshot: inout Snapshot) throws -> [ClipRecord] {
+        guard snapshot.records.count > maximumStoredRecords else {
+            normalizeQueue(in: &snapshot, removedIDs: [])
+            return []
+        }
+        var removed: [ClipRecord] = []
+        while snapshot.records.count > maximumStoredRecords {
+            guard let index = snapshot.records.lastIndex(where: { !$0.isPinned }) else {
+                throw StoreError.historyLimitReached
+            }
+            removed.append(snapshot.records.remove(at: index))
+        }
+        normalizeQueue(in: &snapshot, removedIDs: Set(removed.map(\.id)))
+        return removed
+    }
+
+    private static func normalizeQueue(in snapshot: inout Snapshot, removedIDs: Set<UUID>) {
+        guard !removedIDs.isEmpty else {
+            snapshot.queueIndex = min(max(0, snapshot.queueIndex), snapshot.queue.count)
+            return
+        }
+        let removedBeforeIndex = snapshot.queue.prefix(snapshot.queueIndex).filter { removedIDs.contains($0.clipID) }.count
+        snapshot.queue.removeAll { removedIDs.contains($0.clipID) }
+        snapshot.queueIndex = min(max(0, snapshot.queueIndex - removedBeforeIndex), snapshot.queue.count)
+    }
+
+    private func deleteFiles(for records: [ClipRecord]) {
+        Self.deleteFiles(for: records, payloadsURL: payloadsURL, imagesURL: imagesURL, thumbnailsURL: thumbnailsURL)
+    }
+
+    private static func deleteFiles(
+        for records: [ClipRecord],
+        payloadsURL: URL,
+        imagesURL: URL,
+        thumbnailsURL: URL
+    ) {
+        for record in records {
+            try? FileManager.default.removeItem(at: payloadsURL.appendingPathComponent(record.payloadFile))
+            if let imageFile = record.imageFile {
+                try? FileManager.default.removeItem(at: imagesURL.appendingPathComponent(imageFile))
+            }
+            if let thumbnailFile = record.thumbnailFile {
+                try? FileManager.default.removeItem(at: thumbnailsURL.appendingPathComponent(thumbnailFile))
+            }
+        }
+    }
+
+    private func rebuildDigestLookup() {
+        digestLookup = Dictionary(
+            snapshot.records.compactMap { record in record.digest.map { ($0, record.id) } },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     private static func writeRecoveryCandidateList(

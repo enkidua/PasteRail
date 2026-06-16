@@ -3,6 +3,7 @@
 PasteRail is a free, open-source clipboard manager for macOS 13 and later.
 It keeps clipboard history entirely on the Mac and provides a single scrolling
 panel, search, plain-text paste, and a FIFO paste queue.
+The MVP stores at most 100 recent history items, including pinned items.
 
 ## Status
 

@@ -50,6 +50,10 @@ struct PanelView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            Text("최근 기록 최대 100개 저장")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
     }

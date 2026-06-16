@@ -74,6 +74,79 @@ final class PasteRailTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
+    func testHistoryLimitDeletesOldestUnpinnedAfterOneHundredRecords() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        var firstPayloadFile: String?
+        for index in 0..<100 {
+            let record = try await store.capture(payload: textPayload("limit \(index)"), kind: .text, title: "limit \(index)", searchText: "limit \(index)", sourceAppName: nil, sourceBundleIdentifier: nil)
+            if index == 0 { firstPayloadFile = record.payloadFile }
+        }
+        _ = try await store.capture(payload: textPayload("limit 100"), kind: .text, title: "limit 100", searchText: "limit 100", sourceAppName: nil, sourceBundleIdentifier: nil)
+
+        let records = await store.records()
+        XCTAssertEqual(records.count, ClipStore.maximumStoredRecords)
+        XCTAssertEqual(records.first?.title, "limit 100")
+        XCTAssertFalse(records.contains { $0.title == "limit 0" })
+        XCTAssertTrue(records.contains { $0.title == "limit 1" })
+        if let firstPayloadFile {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("Payloads/\(firstPayloadFile)").path))
+        }
+    }
+
+    func testHistoryLimitKeepsExactlyLatestOneHundredRecords() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        for index in 0..<125 {
+            _ = try await store.capture(payload: textPayload("latest \(index)"), kind: .text, title: "latest \(index)", searchText: "latest \(index)", sourceAppName: nil, sourceBundleIdentifier: nil)
+        }
+        let titles = (await store.records()).map(\.title)
+        XCTAssertEqual(titles.count, ClipStore.maximumStoredRecords)
+        XCTAssertEqual(titles.first, "latest 124")
+        XCTAssertEqual(titles.last, "latest 25")
+        XCTAssertFalse(titles.contains("latest 24"))
+    }
+
+    func testHistoryLimitDuplicateDoesNotIncreaseRecordCount() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        for index in 0..<100 {
+            _ = try await store.capture(payload: textPayload("duplicate-limit \(index)"), kind: .text, title: "duplicate-limit \(index)", searchText: "duplicate-limit \(index)", sourceAppName: nil, sourceBundleIdentifier: nil)
+        }
+        _ = try await store.capture(payload: textPayload("duplicate-limit 0"), kind: .text, title: "duplicate-limit 0", searchText: "duplicate-limit 0", sourceAppName: nil, sourceBundleIdentifier: nil)
+        let records = await store.records()
+        XCTAssertEqual(records.count, ClipStore.maximumStoredRecords)
+        XCTAssertEqual(records.first?.title, "duplicate-limit 0")
+    }
+
+    func testHistoryLimitDoesNotAutoDeletePinnedRecords() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        let pinned = try await store.capture(payload: textPayload("pinned-oldest"), kind: .text, title: "pinned-oldest", searchText: "pinned-oldest", sourceAppName: nil, sourceBundleIdentifier: nil)
+        try await store.setPinned(pinned.id, pinned: true)
+        for index in 1..<101 {
+            _ = try await store.capture(payload: textPayload("unpinned \(index)"), kind: .text, title: "unpinned \(index)", searchText: "unpinned \(index)", sourceAppName: nil, sourceBundleIdentifier: nil)
+        }
+        let records = await store.records()
+        XCTAssertEqual(records.count, ClipStore.maximumStoredRecords)
+        XCTAssertTrue(records.contains { $0.id == pinned.id && $0.isPinned })
+        XCTAssertFalse(records.contains { $0.title == "unpinned 1" })
+    }
+
+    func testHistoryLimitRejectsNewRecordWhenAllOneHundredArePinned() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        var ids: [UUID] = []
+        for index in 0..<100 {
+            let record = try await store.capture(payload: textPayload("all-pinned \(index)"), kind: .text, title: "all-pinned \(index)", searchText: "all-pinned \(index)", sourceAppName: nil, sourceBundleIdentifier: nil)
+            ids.append(record.id)
+        }
+        for id in ids {
+            try await store.setPinned(id, pinned: true)
+        }
+        await XCTAssertThrowsAsyncError {
+            _ = try await store.capture(payload: self.textPayload("blocked"), kind: .text, title: "blocked", searchText: "blocked", sourceAppName: nil, sourceBundleIdentifier: nil)
+        }
+        let records = await store.records()
+        XCTAssertEqual(records.count, ClipStore.maximumStoredRecords)
+        XCTAssertFalse(records.contains { $0.title == "blocked" })
+    }
+
     @MainActor
     func testHistoryFilterCombinesWithSearch() async throws {
         let store = try ClipStore(rootURL: root, keyStore: keyStore)
@@ -343,6 +416,84 @@ final class PasteRailTests: XCTestCase {
             XCTAssertEqual(captured.kind, .image)
             XCTAssertTrue(captured.title.contains("8 x 6"))
         }
+    }
+
+    @MainActor
+    func testHistoryLimitDeletesImagePayloadOriginalAndThumbnail() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        let oldImage = try await store.capture(
+            payload: imagePayload(color: .systemRed),
+            kind: .image,
+            title: "old image",
+            searchText: "old image",
+            sourceAppName: nil,
+            sourceBundleIdentifier: nil
+        )
+        let payloadURL = root.appendingPathComponent("Payloads/\(oldImage.payloadFile)")
+        let imageName = try XCTUnwrap(oldImage.imageFile)
+        let thumbnailName = try XCTUnwrap(oldImage.thumbnailFile)
+        let imageURL = root.appendingPathComponent("Images/\(imageName)")
+        let thumbnailURL = root.appendingPathComponent("Thumbnails/\(thumbnailName)")
+        for index in 1..<101 {
+            _ = try await store.capture(payload: textPayload("fill \(index)"), kind: .text, title: "fill \(index)", searchText: "fill \(index)", sourceAppName: nil, sourceBundleIdentifier: nil)
+        }
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: payloadURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: imageURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: thumbnailURL.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Payloads").path).count, ClipStore.maximumStoredRecords)
+    }
+
+    func testHistoryLimitRemovesDeletedRecordsFromQueueAndNormalizesIndex() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        let oldest = try await store.capture(payload: textPayload("queued oldest"), kind: .text, title: "queued oldest", searchText: "queued oldest", sourceAppName: nil, sourceBundleIdentifier: nil)
+        var middle = oldest
+        for index in 1..<100 {
+            let record = try await store.capture(payload: textPayload("queued \(index)"), kind: .text, title: "queued \(index)", searchText: "queued \(index)", sourceAppName: nil, sourceBundleIdentifier: nil)
+            if index == 50 { middle = record }
+        }
+        let newest = try XCTUnwrap((await store.records()).first)
+        try await store.enqueue([oldest.id, middle.id, newest.id])
+        _ = try await store.capture(payload: textPayload("queue limit"), kind: .text, title: "queue limit", searchText: "queue limit", sourceAppName: nil, sourceBundleIdentifier: nil)
+
+        let queue = await store.queueState()
+        XCTAssertEqual(queue.0.map(\.clipID), [middle.id, newest.id])
+        XCTAssertEqual(queue.1, 0)
+        XCTAssertEqual(await store.currentQueueEntry()?.clipID, middle.id)
+    }
+
+    func testHistoryLimitPersistFailureKeepsExistingRecordsAndFiles() async throws {
+        let base = try ClipStore(rootURL: root, keyStore: keyStore)
+        for index in 0..<100 {
+            _ = try await base.capture(payload: textPayload("rollback \(index)"), kind: .text, title: "rollback \(index)", searchText: "rollback \(index)", sourceAppName: nil, sourceBundleIdentifier: nil)
+        }
+        let payloadsBefore = Set(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Payloads").path))
+        let failure = FileOperationFailure(.beforeHistoryLimitPersist)
+        let store = try ClipStore(rootURL: root, keyStore: keyStore, fileOperationInjector: { try failure.check($0) })
+
+        await XCTAssertThrowsAsyncError {
+            _ = try await store.capture(payload: self.textPayload("should rollback"), kind: .text, title: "should rollback", searchText: "should rollback", sourceAppName: nil, sourceBundleIdentifier: nil)
+        }
+
+        let records = await store.records()
+        let payloadsAfter = Set(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Payloads").path))
+        XCTAssertEqual(records.count, ClipStore.maximumStoredRecords)
+        XCTAssertTrue(records.contains { $0.title == "rollback 0" })
+        XCTAssertFalse(records.contains { $0.title == "should rollback" })
+        XCTAssertEqual(payloadsAfter, payloadsBefore)
+    }
+
+    func testStartupSafelyPrunesLegacyStoreAboveOneHundredRecords() async throws {
+        try writeEncryptedSnapshot(recordCount: 105)
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        let titles = (await store.records()).map(\.title)
+
+        XCTAssertEqual(titles.count, ClipStore.maximumStoredRecords)
+        XCTAssertEqual(titles.first, "legacy 104")
+        XCTAssertEqual(titles.last, "legacy 5")
+        XCTAssertFalse(titles.contains("legacy 4"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("Payloads/legacy-0.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("Payloads/legacy-5.json").path))
     }
 
     @MainActor
@@ -636,16 +787,16 @@ final class PasteRailTests: XCTestCase {
         }
     }
 
-    func testOneThousandRecordsPersist() async throws {
+    func testOneHundredRecordsPersistAndSearchWithinMVPRange() async throws {
         let store = try ClipStore(rootURL: root, keyStore: keyStore)
-        for index in 0..<1_000 {
+        for index in 0..<100 {
             let text = "record \(index)"
             _ = try await store.capture(payload: textPayload(text), kind: .text, title: text, searchText: text, sourceAppName: nil, sourceBundleIdentifier: "com.apple.TextEdit")
         }
         let records = await store.records()
-        XCTAssertEqual(records.count, 1_000)
+        XCTAssertEqual(records.count, 100)
         let searchStarted = CFAbsoluteTimeGetCurrent()
-        let matches = records.filter { $0.searchText.localizedCaseInsensitiveContains("999") }
+        let matches = records.filter { $0.searchText.localizedCaseInsensitiveContains("99") }
         let searchDuration = CFAbsoluteTimeGetCurrent() - searchStarted
         XCTAssertEqual(matches.count, 1)
         XCTAssertLessThan(searchDuration, 0.05)
@@ -844,6 +995,49 @@ final class PasteRailTests: XCTestCase {
 
     private func textPayload(_ text: String) -> ClipPayload {
         ClipPayload(items: [[.init(pasteboardType: NSPasteboard.PasteboardType.string.rawValue, data: Data(text.utf8))]])
+    }
+
+    @MainActor
+    private func imagePayload(color: NSColor) throws -> ClipPayload {
+        let image = NSImage(size: NSSize(width: 10, height: 8))
+        image.lockFocus()
+        color.setFill()
+        NSRect(x: 0, y: 0, width: 10, height: 8).fill()
+        image.unlockFocus()
+        let tiff = try XCTUnwrap(image.tiffRepresentation)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiff))
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        return ClipPayload(items: [[.init(pasteboardType: NSPasteboard.PasteboardType.png.rawValue, data: png)]])
+    }
+
+    private func writeEncryptedSnapshot(recordCount: Int) throws {
+        let payloadDirectory = root.appendingPathComponent("Payloads")
+        try FileManager.default.createDirectory(at: payloadDirectory, withIntermediateDirectories: true)
+        let crypto = try CryptoStore(keyStore: keyStore)
+        let records = try (0..<recordCount).reversed().map { index -> ClipRecord in
+            let payloadName = "legacy-\(index).json"
+            let payload = textPayload("legacy \(index)")
+            try crypto.seal(JSONEncoder.pasteRailTest.encode(payload))
+                .write(to: payloadDirectory.appendingPathComponent(payloadName), options: .atomic)
+            return ClipRecord(
+                id: UUID(),
+                kind: .text,
+                title: "legacy \(index)",
+                searchText: "legacy \(index)",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                sourceAppName: nil,
+                sourceBundleIdentifier: nil,
+                payloadFile: payloadName,
+                imageFile: nil,
+                thumbnailFile: nil,
+                digest: nil,
+                isSensitive: false,
+                isPinned: false
+            )
+        }
+        let snapshot = ClipStore.Snapshot(schemaVersion: 3, records: records, queue: [], queueIndex: 0)
+        try crypto.seal(JSONEncoder.pasteRailTest.encode(snapshot))
+            .write(to: root.appendingPathComponent("history.enc"), options: .atomic)
     }
 
     private func isolatedDefaults() throws -> UserDefaults {

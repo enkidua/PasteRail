@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class AppModel: ObservableObject {
     private static let filterDefaultsKey = "PasteRail.HistoryFilter"
+    private static let maximumCachedThumbnails = 30
 
     @Published private(set) var records: [ClipRecord] = []
     @Published private(set) var queue: [QueueEntry] = []
@@ -21,6 +22,9 @@ final class AppModel: ObservableObject {
     let pasteEnvironment: SystemPasteEnvironment
     let pasteService: PasteService
     private let defaults: UserDefaults
+    private var thumbnailCache: [UUID: NSImage] = [:]
+    private var thumbnailCacheOrder: [UUID] = []
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
     private(set) var monitor: PasteboardMonitor!
 
     init(store: ClipStore, defaults: UserDefaults = .standard) {
@@ -32,6 +36,11 @@ final class AppModel: ObservableObject {
         pasteEnvironment = SystemPasteEnvironment()
         pasteService = PasteService(environment: pasteEnvironment)
         pasteEnvironment.didWritePasteboard = { [weak self] in self?.monitor.markInternalWrite() }
+        memoryPressureSource = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        memoryPressureSource?.setEventHandler { [weak self] in
+            Task { @MainActor in self?.clearThumbnailCache() }
+        }
+        memoryPressureSource?.resume()
         monitor = PasteboardMonitor { [weak self] payload, kind, title, searchText, app in
             guard let self else { return }
             Task {
@@ -46,7 +55,11 @@ final class AppModel: ObservableObject {
                     )
                     await self.reload()
                 } catch {
-                    self.errorMessage = "PasteRail could not safely store this clipboard item."
+                    if case ClipStore.StoreError.historyLimitReached = error {
+                        self.errorMessage = "PasteRail stores up to 100 recent items. All current items are pinned, so the new item was not saved."
+                    } else {
+                        self.errorMessage = "PasteRail could not safely store this clipboard item."
+                    }
                 }
             }
         }
@@ -243,7 +256,35 @@ final class AppModel: ObservableObject {
     }
 
     func thumbnail(for record: ClipRecord) async -> NSImage? {
-        await store.thumbnail(for: record)
+        if let cached = thumbnailCache[record.id] {
+            rememberThumbnailUse(record.id)
+            return cached
+        }
+        guard let data = await store.thumbnailData(for: record),
+              let image = NSImage(data: data) else {
+            return nil
+        }
+        thumbnailCache[record.id] = image
+        rememberThumbnailUse(record.id)
+        trimThumbnailCache()
+        return image
+    }
+
+    private func rememberThumbnailUse(_ id: UUID) {
+        thumbnailCacheOrder.removeAll { $0 == id }
+        thumbnailCacheOrder.insert(id, at: 0)
+    }
+
+    private func trimThumbnailCache() {
+        while thumbnailCacheOrder.count > Self.maximumCachedThumbnails {
+            let id = thumbnailCacheOrder.removeLast()
+            thumbnailCache.removeValue(forKey: id)
+        }
+    }
+
+    private func clearThumbnailCache() {
+        thumbnailCache.removeAll()
+        thumbnailCacheOrder.removeAll()
     }
 }
 

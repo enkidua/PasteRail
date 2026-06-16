@@ -128,14 +128,24 @@ overwriting malformed data.
 - Payloads larger than 100 MiB are ignored.
 - Concealed and transient pasteboard types fail closed.
 - Images are normalized into separate PNG originals and thumbnails for storage.
+- PasteRail stores at most 100 recent history records. Pinned records count toward
+  the same limit. When the limit is reached, the oldest unpinned record is removed
+  from the authenticated index, encrypted payload, original image, thumbnail, and
+  paste queue after the replacement index is written. If all 100 records are pinned,
+  the new capture is rejected and the user is notified.
+- Thumbnail previews are decrypted on demand and cached in memory for at most the
+  30 most recently used records. The cache is cleared on memory-pressure warnings.
 
 ## Storage performance gates
 
 The MVP keeps the JSON index while these automated limits pass:
 
-- 1,000-record initial load below 500 ms
+- 100-record initial load below 500 ms
 - one ordinary text save below 100 ms
 - one duplicate lookup and update below 20 ms
+- 100-record search without visible input stalls
+- 101st capture plus automatic pruning without index, payload, image, thumbnail,
+  or queue divergence
 
 The performance test also reports index size and process resident memory. If these
 limits fail on the supported test Macs, storage must move to SQLite before OCR work.
