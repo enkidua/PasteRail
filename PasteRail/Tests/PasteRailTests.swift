@@ -452,14 +452,16 @@ final class PasteRailTests: XCTestCase {
             let record = try await store.capture(payload: textPayload("queued \(index)"), kind: .text, title: "queued \(index)", searchText: "queued \(index)", sourceAppName: nil, sourceBundleIdentifier: nil)
             if index == 50 { middle = record }
         }
-        let newest = try XCTUnwrap((await store.records()).first)
+        let currentRecords = await store.records()
+        let newest = try XCTUnwrap(currentRecords.first)
         try await store.enqueue([oldest.id, middle.id, newest.id])
         _ = try await store.capture(payload: textPayload("queue limit"), kind: .text, title: "queue limit", searchText: "queue limit", sourceAppName: nil, sourceBundleIdentifier: nil)
 
         let queue = await store.queueState()
+        let currentEntry = await store.currentQueueEntry()
         XCTAssertEqual(queue.0.map(\.clipID), [middle.id, newest.id])
         XCTAssertEqual(queue.1, 0)
-        XCTAssertEqual(await store.currentQueueEntry()?.clipID, middle.id)
+        XCTAssertEqual(currentEntry?.clipID, middle.id)
     }
 
     func testHistoryLimitPersistFailureKeepsExistingRecordsAndFiles() async throws {
