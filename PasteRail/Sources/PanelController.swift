@@ -89,6 +89,7 @@ final class PanelController: NSWindowController, NSWindowDelegate {
 
     private func handleKeyEvent(_ event: NSEvent) -> Bool {
         guard window?.isKeyWindow == true else { return false }
+        let textFieldIsEditing = isEditingTextField
         switch event.keyCode {
         case 53:
             dismissPanel()
@@ -101,9 +102,14 @@ final class PanelController: NSWindowController, NSWindowDelegate {
         case 121:
             model.moveFocus(.pageDown)
         case 115:
+            if textFieldIsEditing { return false }
             model.moveFocus(.first)
         case 119:
+            if textFieldIsEditing { return false }
             model.moveFocus(.last)
+        case 123, 124:
+            if textFieldIsEditing { return false }
+            return false
         case 36, 76:
             model.pasteFocused(
                 plainText: event.modifierFlags.contains(.shift),
@@ -113,5 +119,10 @@ final class PanelController: NSWindowController, NSWindowDelegate {
             return false
         }
         return true
+    }
+
+    private var isEditingTextField: Bool {
+        guard let textView = window?.firstResponder as? NSTextView else { return false }
+        return textView.isFieldEditor
     }
 }

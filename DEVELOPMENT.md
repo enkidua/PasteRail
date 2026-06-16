@@ -150,6 +150,28 @@ The MVP keeps the JSON index while these automated limits pass:
 The performance test also reports index size and process resident memory. If these
 limits fail on the supported test Macs, storage must move to SQLite before OCR work.
 
+## Packaging
+
+Do not share a ZIP made from the whole project root. Review and distribution
+artifacts must be created only with `Scripts/package-source.sh`,
+`Scripts/package-universal.sh`, or `Scripts/package-review.sh`.
+
+`package-source.sh` creates a source-only archive from an allow-listed staging
+folder and fails if `.build`, `.swiftpm`, `DerivedData`, `ModuleCache`, dSYM
+bundles, app bundles, logs, user state, or the Universal app ZIP appear in the
+archive. `package-review.sh` creates a small review archive containing only the
+source ZIP, Universal app ZIP, README, development record, and privacy document.
+
+## Manual UI verification checklist
+
+- Pin button click changes only the pinned state and does not paste.
+- Queue selection button click changes only queue selection and does not paste.
+- Row content click focuses the row and starts the paste path.
+- With the search field focused, left/right arrow and Home/End remain text-field
+  editing keys.
+- With the search field focused, up/down arrow and Page Up/Down move list focus,
+  and Enter pastes the focused record by design.
+
 ## Verification status
 
 Current status on June 16, 2026:

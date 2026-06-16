@@ -80,13 +80,13 @@ struct PanelView: View {
                                 record: record,
                                 isFocused: model.focusedRecordID == record.id,
                                 isSelectedForQueue: model.selection.contains(record.id),
-                                isQueued: model.isQueued(record)
+                                isQueued: model.isQueued(record),
+                                paste: {
+                                    model.focus(record.id)
+                                    model.paste(record, dismissPanel: dismiss)
+                                }
                             )
                             .id(record.id)
-                            .onTapGesture {
-                                model.focus(record.id)
-                                model.paste(record, dismissPanel: dismiss)
-                            }
                             Divider()
                         }
                     }
@@ -154,6 +154,7 @@ private struct ClipRow: View {
     let isFocused: Bool
     let isSelectedForQueue: Bool
     let isQueued: Bool
+    let paste: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -165,51 +166,60 @@ private struct ClipRow: View {
             }
             .buttonStyle(.plain)
             .help("Select for queue")
+            .accessibilityLabel(isSelectedForQueue ? "Remove from queue selection" : "Select for queue")
+            .accessibilityHint("Changes queue selection without pasting this item.")
 
-            preview
-                .frame(width: 58, height: 46)
+            Button(action: paste) {
+                HStack(spacing: 10) {
+                    preview
+                        .frame(width: 58, height: 46)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(displayTitle)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Button {
-                        model.togglePinned(record)
-                    } label: {
-                        Image(systemName: record.isPinned ? "pin.fill" : "pin")
-                    }
-                    .buttonStyle(.plain)
-                    .help(record.isPinned ? "Unpin item" : "Pin item")
-                    .accessibilityLabel(record.isPinned ? "Unpin item" : "Pin item")
-                    if record.isPinned {
-                        Text("Pinned")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
-                    }
-                    if isQueued {
-                        Image(systemName: "text.line.first.and.arrowtriangle.forward")
-                            .accessibilityLabel("In paste queue")
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text(displayTitle)
+                                .lineLimit(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            if record.isPinned {
+                                Image(systemName: "pin.fill")
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityHidden(true)
+                            }
+                            if isQueued {
+                                Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                                    .accessibilityLabel("In paste queue")
+                            }
+                        }
+                        HStack(spacing: 8) {
+                            Text(record.kind.label)
+                            Text(record.sourceAppName ?? "Unknown application")
+                            Text(record.createdAt, style: .relative)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                     }
                 }
-                HStack(spacing: 8) {
-                    Text(record.kind.label)
-                    Text(record.sourceAppName ?? "Unknown application")
-                    Text(record.createdAt, style: .relative)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
             }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel(accessibilityTitle)
+            .accessibilityHint("Pastes this item into the target application.")
+
+            Button {
+                model.togglePinned(record)
+            } label: {
+                Image(systemName: record.isPinned ? "pin.fill" : "pin")
+            }
+            .buttonStyle(.plain)
+            .help(record.isPinned ? "Unpin item" : "Pin item")
+            .accessibilityLabel(record.isPinned ? "Unpin item" : "Pin item")
+            .accessibilityHint("Changes pinned state without pasting this item.")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
         .background(isFocused ? Color.accentColor.opacity(0.16) : Color.clear)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityTitle)
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
