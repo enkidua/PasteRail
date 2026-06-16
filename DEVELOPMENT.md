@@ -183,6 +183,10 @@ and verifies the Universal app, prints `lipo` and codesign results, and uploads 
 `PasteRail-0.1.0-universal` artifact. Keychain integration tests run only through
 the explicit `workflow_dispatch` option.
 
+CodeQL uses manual Swift build mode. It selects Xcode in a stable priority order
+(`Xcode_16.4`, then `Xcode_16.3`, then `Xcode.app`), cleans SwiftPM build state,
+and performs a single debug build for extractor database creation before analyze.
+
 Update compatibility coverage creates encrypted history with one stable key-store
 instance, reopens it through a new `ClipStore`, verifies the old record, and then
 confirms that access with a different key fails without replacing the encrypted

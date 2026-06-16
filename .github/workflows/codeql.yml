@@ -11,17 +11,34 @@ jobs:
     runs-on: macos-15
     permissions:
       security-events: write
+      packages: read
+      actions: read
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: Select installed stable Xcode
+      - name: Select Xcode
         run: |
-          selected="$(ls -dt /Applications/Xcode*.app | head -1)"
-          sudo xcode-select --switch "$selected/Contents/Developer"
+          set -euo pipefail
+          for candidate in \
+            /Applications/Xcode_16.4.app \
+            /Applications/Xcode_16.3.app \
+            /Applications/Xcode.app
+          do
+            if [ -d "$candidate/Contents/Developer" ]; then
+              sudo xcode-select --switch "$candidate/Contents/Developer"
+              break
+            fi
+          done
+          xcode-select -p
+          xcodebuild -version
+          swift --version
+          xcrun --sdk macosx --show-sdk-version
       - uses: github/codeql-action/init@v3
         with:
           languages: swift
           build-mode: manual
-      - name: Build PasteRail
-        run: swift build -c release
+      - name: Clean SwiftPM build state
+        run: rm -rf .build .swiftpm
+      - name: Build for CodeQL
+        run: swift build -c debug
       - uses: github/codeql-action/analyze@v3
