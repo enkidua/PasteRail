@@ -174,9 +174,19 @@ private struct ClipRow: View {
                     Text(displayTitle)
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        model.togglePinned(record)
+                    } label: {
+                        Image(systemName: record.isPinned ? "pin.fill" : "pin")
+                    }
+                    .buttonStyle(.plain)
+                    .help(record.isPinned ? "Unpin item" : "Pin item")
+                    .accessibilityLabel(record.isPinned ? "Unpin item" : "Pin item")
                     if record.isPinned {
-                        Image(systemName: "pin.fill")
-                            .accessibilityLabel("Pinned")
+                        Text("Pinned")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
                     }
                     if isQueued {
                         Image(systemName: "text.line.first.and.arrowtriangle.forward")

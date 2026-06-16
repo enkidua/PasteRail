@@ -146,6 +146,18 @@ final class AppModel: ObservableObject {
         focusedRecordID = id
     }
 
+    func togglePinned(_ record: ClipRecord) {
+        Task {
+            do {
+                try await store.setPinned(record.id, pinned: !record.isPinned)
+                await reload()
+            } catch {
+                errorMessage = "PasteRail could not save the pin change."
+                await reload()
+            }
+        }
+    }
+
     func focus(_ id: UUID) {
         focusedRecordID = id
     }

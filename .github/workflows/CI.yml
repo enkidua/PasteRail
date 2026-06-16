@@ -40,8 +40,8 @@ jobs:
           echo "Passed tests: $passed"
           echo "Failed tests: $failures"
           echo "Skipped tests: $skipped"
-          if (( executed < 47 )); then
-            echo "Expected at least 47 ordinary tests, but only $executed executed."
+          if (( executed < 59 )); then
+            echo "Expected at least 59 ordinary tests, but only $executed executed."
             exit 1
           fi
           if (( failures > 0 )); then exit 1; fi

@@ -29,6 +29,7 @@ find "$PACKAGE" \( \
   -name DerivedData -o \
   -name '*.dSYM' -o \
   -name '*.dSYM.zip' -o \
+  -name 'PasteRail-*.zip' -o \
   -name '*.log' -o \
   -name .DS_Store -o \
   -name xcuserdata -o \

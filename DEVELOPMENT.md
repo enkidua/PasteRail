@@ -152,27 +152,32 @@ limits fail on the supported test Macs, storage must move to SQLite before OCR w
 
 ## Verification status
 
-Current status on June 15, 2026:
+Current status on June 16, 2026:
 
-- Release build: passed without compiler warnings.
-- Universal 2 build: passed for `arm64` and `x86_64`.
+- Release build: passed locally after removing stale `.build` and `.swiftpm`.
+- Universal 2 build: passed locally for `arm64` and `x86_64`.
 - `lipo`: reported `x86_64 arm64`.
-- Temporary ad-hoc codesign verification: passed.
-- Ordinary tests implemented: 48 after adding update compatibility coverage.
+- Temporary ad-hoc codesign verification: passed locally. This is not a Developer
+  ID signature and is not notarization; Gatekeeper can still warn or block the app
+  on other Macs.
+- Ordinary tests implemented: 59.
+- Keychain integration tests implemented: 1 opt-in test.
 - Local tests executed: 0. Neither XCTest nor Swift Testing is present in the
   selected Command Line Tools installation.
+- GitHub Actions ordinary test gate: requires at least 59 executed ordinary tests.
+- Latest GitHub Actions CI for commit `70f4187` executed 59 ordinary tests with
+  59 passed, 0 failed, and 0 skipped, then built and verified the Universal app.
 - Keychain integration testing remains opt-in and separate.
 - Actual Intel Mac execution: not verified.
 - Actual clipboard, Accessibility, password-manager exclusion, VoiceOver, dark
   mode, and multi-monitor behavior: not verified.
-- Actual Apple Silicon launch: verified from the packaged Universal ZIP; the
-  `arm64`-capable app process started successfully and was then terminated.
+- Actual Apple Silicon launch: latest rebuilt Universal app was opened on Apple
+  Silicon and produced a `PasteRail` process. It exited before termination was
+  needed; clipboard and Accessibility workflows remain unverified.
 - Apple Silicon clipboard paste and Accessibility workflow: not verified.
-- GitHub Actions CI: prepared but not dispatched because this workspace has no Git
-  metadata and the authenticated GitHub account has no PasteRail repository.
 
 CI now prints Xcode, Swift, and macOS SDK versions, reports executed, failed, and
-skipped test counts, and fails when fewer than 47 ordinary tests execute. It builds
+skipped test counts, and fails when fewer than 59 ordinary tests execute. It builds
 and verifies the Universal app, prints `lipo` and codesign results, and uploads only
 `PasteRail-0.1.0-universal.zip` as the
 `PasteRail-0.1.0-universal` artifact. Keychain integration tests run only through
