@@ -707,9 +707,11 @@ final class PasteRailTests: XCTestCase {
             capturedText = payload.plainText
         }
 
-        board.setString("internal", forType: .string)
+        board.clearContents()
+        XCTAssertTrue(board.setString("internal", forType: .string))
         monitor.markInternalWrite()
-        board.setString("external", forType: .string)
+        board.clearContents()
+        XCTAssertTrue(board.setString("external", forType: .string))
         monitor.handleActivation(source)
 
         XCTAssertEqual(capturedText, "external")
