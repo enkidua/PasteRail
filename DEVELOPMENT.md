@@ -240,10 +240,13 @@ Current status on June 17, 2026:
 - The June 17 local `swift test --filter PasteRailTests` attempt compiled and
   linked the app target but executed 0 tests because XCTest is unavailable in the
   selected Command Line Tools. The 67-test suite has not passed locally.
-- The latest queried GitHub CI and CodeQL runs (`9729764`) succeeded on June 16,
-  but predate the 500 MiB limit and 67-test gate. A new CI run is required for the
-  current source. The latest CodeQL job completed init, manual Swift build, and
-  analyze successfully; this is historical, not validation of the current diff.
+- GitHub CI run `27677174032` for commit `68e86e1` executed all 67 ordinary tests
+  with 67 passed, 0 failed, and 0 skipped. Debug, Release, Universal build,
+  architecture verification, strict ad-hoc codesign verification, Universal ZIP
+  structure validation, and artifact upload passed. The opt-in Keychain integration
+  job was skipped as designed.
+- CodeQL run `27677173893` for commit `68e86e1` passed Xcode selection, CodeQL init,
+  the manual Swift build/extraction step, analyze, and upload.
 
 CI now prints Xcode, Swift, and macOS SDK versions, reports executed, failed, and
 skipped test counts, and fails when fewer than 67 ordinary tests execute. It builds
