@@ -10,6 +10,9 @@ app has an ad-hoc signature and is not Developer ID signed or notarized.
 - [ ] Confirm the menu bar icon appears.
 - [ ] Press Command-Shift-V and confirm the history panel opens.
 - [ ] With multiple displays, confirm the panel appears on the display containing the mouse pointer.
+- [ ] Install the same signed build again and confirm existing encrypted history opens without repeated Keychain prompts.
+- [ ] Install a newer build signed by the same Developer ID team and confirm the existing Keychain key and encrypted history remain usable.
+- [ ] When moving from an older ad-hoc build to the Developer ID build, record whether macOS requests one-time Keychain approval. Confirm approval does not create a replacement key or delete existing encrypted data.
 
 ## Capture And Browsing
 

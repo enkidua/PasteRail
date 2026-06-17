@@ -198,6 +198,18 @@ signature and both architectures, creates a DMG containing `PasteRail.app` and a
 Applications shortcut, and runs `hdiutil verify`. This is a local manual-test
 artifact only; it is neither Developer ID signed nor notarized.
 
+Direct distribution uses the separate `package-release-dmg.sh` path documented in
+`RELEASE.md`. It requires `DEVELOPMENT_TEAM`, `DEVELOPER_ID_APPLICATION`, and
+notarytool credentials; signs the app with Hardened Runtime and secure timestamp;
+notarizes and staples both the app and final DMG; and verifies them with codesign,
+stapler, and Gatekeeper. If the certificate is unavailable, it creates only the
+ad-hoc test DMG and exits unsuccessfully rather than reporting a release.
+
+The production Keychain service `io.pasterail.PasteRail.storage` and account
+`primary-aes-gcm-key` remain unchanged. A same-team signed update should reuse the
+item, while the transition from an ad-hoc signature may trigger one-time macOS
+Keychain approval. This transition remains a required manual release test.
+
 ## Manual UI verification checklist
 
 - Pin button click changes only the pinned state and does not paste.
@@ -247,6 +259,12 @@ Current status on June 17, 2026:
   job was skipped as designed.
 - CodeQL run `27677173893` for commit `68e86e1` passed Xcode selection, CodeQL init,
   the manual Swift build/extraction step, analyze, and upload.
+- Direct-distribution scripts were added on June 17. The local Keychain reported
+  zero valid code-signing identities, so Developer ID signing, secure timestamp,
+  Apple notarization, stapling, and Gatekeeper acceptance were not executed or
+  marked successful. The release script correctly selected its certificate-missing
+  fallback, rebuilt the Universal app, and created only the ad-hoc manual-test DMG;
+  `hdiutil verify` passed and no `PasteRail-0.1.0-release.dmg` was produced.
 
 CI now prints Xcode, Swift, and macOS SDK versions, reports executed, failed, and
 skipped test counts, and fails when fewer than 67 ordinary tests execute. It builds

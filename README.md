@@ -66,6 +66,10 @@ Applications shortcut. The app is ad-hoc signed for local testing; the DMG and a
 are not Developer ID signed or notarized. Follow `MANUAL_TEST.md` before treating
 the build as release-ready.
 
+Developer ID direct-distribution packaging is documented in `RELEASE.md`. It is
+separate from the ad-hoc test DMG and requires an Apple Developer certificate and
+notarization credentials.
+
 ## Sharing
 
 Do not compress or share the whole project folder. Root archives such as

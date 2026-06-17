@@ -32,7 +32,7 @@ rm -f "$ARCHIVE"
 ensure_current "$SOURCE_ZIP" \
   "$ROOT/Package.swift" "$ROOT/PasteRail" "$ROOT/Scripts" \
   "$ROOT/README.md" "$ROOT/DEVELOPMENT.md" "$ROOT/PRIVACY.md" \
-  "$ROOT/MANUAL_TEST.md" "$ROOT/LICENSE" "$ROOT/.github" "$ROOT/.gitignore"
+  "$ROOT/RELEASE.md" "$ROOT/MANUAL_TEST.md" "$ROOT/LICENSE" "$ROOT/.github" "$ROOT/.gitignore"
 
 "$ROOT/Scripts/package-universal.sh" "$VERSION"
 ensure_current "$APP_ZIP" \
@@ -46,6 +46,7 @@ cp "$SOURCE_ZIP" "$PACKAGE/"
 cp "$APP_ZIP" "$PACKAGE/"
 cp "$ROOT/README.md" "$PACKAGE/"
 cp "$ROOT/DEVELOPMENT.md" "$PACKAGE/"
+cp "$ROOT/RELEASE.md" "$PACKAGE/"
 cp "$ROOT/MANUAL_TEST.md" "$PACKAGE/"
 if [ -f "$ROOT/PRIVACY.md" ]; then
   cp "$ROOT/PRIVACY.md" "$PACKAGE/"
