@@ -10,6 +10,8 @@
     <string>PasteRail</string>
     <key>CFBundleIdentifier</key>
     <string>io.pasterail.PasteRail</string>
+    <key>CFBundleIconFile</key>
+    <string>PasteRail.icns</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

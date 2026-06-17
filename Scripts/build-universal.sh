@@ -17,6 +17,7 @@ lipo -create \
   -output "$APP/Contents/MacOS/PasteRail"
 
 cp "$ROOT/PasteRail/Resources/Info.plist" "$APP/Contents/Info.plist"
+cp "$ROOT/PasteRail/Resources/PasteRail.icns" "$APP/Contents/Resources/PasteRail.icns"
 codesign --force --deep --sign - "$APP"
 lipo "$APP/Contents/MacOS/PasteRail" -verify_arch arm64 x86_64
 lipo -info "$APP/Contents/MacOS/PasteRail"
