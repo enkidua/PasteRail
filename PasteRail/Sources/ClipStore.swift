@@ -13,6 +13,8 @@ enum ClipStoreFileOperation: Equatable, Sendable {
 
 actor ClipStore {
     static let maximumStoredRecords = 100
+    static let maximumPayloadBytes = 20 * 1024 * 1024
+    static let maximumStorageBytes: Int64 = 500 * 1024 * 1024
 
     private struct BootstrapResult {
         var snapshot: Snapshot
@@ -51,6 +53,8 @@ actor ClipStore {
         case corruptIndex(URL)
         case encryptionUnavailable
         case historyLimitReached
+        case payloadTooLarge
+        case storageLimitReached
     }
 
     struct Snapshot: Codable, Equatable {
@@ -68,6 +72,7 @@ actor ClipStore {
     private let backupURL: URL
     private let recoveryURL: URL
     private let crypto: CryptoStore
+    private let storageLimitBytes: Int64
     private let persistenceFailureInjector: (@Sendable () throws -> Void)?
     private let fileOperationInjector: (@Sendable (ClipStoreFileOperation) throws -> Void)?
     private var snapshot: Snapshot
@@ -79,6 +84,7 @@ actor ClipStore {
     init(
         rootURL: URL? = nil,
         keyStore: EncryptionKeyStore = KeychainEncryptionKeyStore(),
+        storageLimitBytes: Int64 = ClipStore.maximumStorageBytes,
         persistenceFailureInjector: (@Sendable () throws -> Void)? = nil,
         fileOperationInjector: (@Sendable (ClipStoreFileOperation) throws -> Void)? = nil
     ) throws {
@@ -117,6 +123,7 @@ actor ClipStore {
             backupURL: localBackupURL,
             recoveryURL: localRecoveryURL,
             crypto: localCrypto,
+            storageLimitBytes: storageLimitBytes,
             persistenceFailureInjector: persistenceFailureInjector,
             fileOperationInjector: fileOperationInjector
         )
@@ -129,6 +136,7 @@ actor ClipStore {
         backupURL = localBackupURL
         recoveryURL = localRecoveryURL
         crypto = localCrypto
+        self.storageLimitBytes = storageLimitBytes
         self.persistenceFailureInjector = persistenceFailureInjector
         self.fileOperationInjector = fileOperationInjector
         snapshot = bootstrap.snapshot
@@ -153,6 +161,7 @@ actor ClipStore {
         backupURL: URL,
         recoveryURL: URL,
         crypto: CryptoStore,
+        storageLimitBytes: Int64,
         persistenceFailureInjector: (@Sendable () throws -> Void)?,
         fileOperationInjector: (@Sendable (ClipStoreFileOperation) throws -> Void)?
     ) throws -> BootstrapResult {
@@ -213,9 +222,15 @@ actor ClipStore {
                 fileOperationInjector: fileOperationInjector
             )
         }
-        if snapshot.records.count > maximumStoredRecords {
+        do {
             var limited = snapshot
-            let removed = try applyHistoryLimit(to: &limited)
+            let removed = try applyLimits(
+                to: &limited,
+                storageLimitBytes: storageLimitBytes,
+                payloadsURL: payloadsURL,
+                imagesURL: imagesURL,
+                thumbnailsURL: thumbnailsURL
+            )
             if !removed.isEmpty {
                 try fileOperationInjector?(.beforeHistoryLimitPersist)
                 try persistSnapshot(
@@ -229,6 +244,14 @@ actor ClipStore {
                 deleteFiles(for: removed, payloadsURL: payloadsURL, imagesURL: imagesURL, thumbnailsURL: thumbnailsURL)
                 snapshot = limited
             }
+        } catch StoreError.storageLimitReached {
+            recoveryMessage = [recoveryMessage, "Stored pinned clipboard records exceed the storage limit. PasteRail preserved them and will reject new records until space is available."]
+                .compactMap { $0 }
+                .joined(separator: "\n")
+        } catch StoreError.historyLimitReached {
+            recoveryMessage = [recoveryMessage, "More than 100 stored records are pinned. PasteRail preserved them and will reject new records until records are unpinned or removed."]
+                .compactMap { $0 }
+                .joined(separator: "\n")
         }
 
         do {
@@ -362,6 +385,9 @@ actor ClipStore {
         sourceAppName: String?,
         sourceBundleIdentifier: String?
     ) throws -> ClipRecord {
+        guard payload.representations.reduce(0, { $0 + $1.data.count }) <= Self.maximumPayloadBytes else {
+            throw StoreError.payloadTooLarge
+        }
         let duplicateStarted = CFAbsoluteTimeGetCurrent()
         let digest = Self.payloadDigest(payload)
         if let existingID = digestLookup[digest],
@@ -391,15 +417,13 @@ actor ClipStore {
         let payloadURL = payloadsURL.appendingPathComponent(payloadName)
         try atomicWrite(try crypto.seal(JSONEncoder.pasteRail.encode(payload)), to: payloadURL)
 
-        var imageName: String?
+        let imageName: String? = nil
         var thumbnailName: String?
         do {
             if kind == .image, let imageData = preferredImageData(in: payload) {
                 let decoded = NSImage(data: imageData)
                 guard let decoded else { throw StoreError.invalidImage }
-                imageName = "\(id.uuidString).png"
                 thumbnailName = "\(id.uuidString).png"
-                try atomicWrite(try crypto.seal(pngData(from: decoded, maximumDimension: nil)), to: imagesURL.appendingPathComponent(imageName!))
                 try atomicWrite(try crypto.seal(pngData(from: decoded, maximumDimension: 160)), to: thumbnailsURL.appendingPathComponent(thumbnailName!))
             }
         } catch {
@@ -429,10 +453,19 @@ actor ClipStore {
         digestLookup[digest] = id
         var recordsToDelete: [ClipRecord] = []
         do {
-            recordsToDelete = try Self.applyHistoryLimit(to: &snapshot)
+            recordsToDelete = try Self.applyLimits(
+                to: &snapshot,
+                storageLimitBytes: storageLimitBytes,
+                payloadsURL: payloadsURL,
+                imagesURL: imagesURL,
+                thumbnailsURL: thumbnailsURL
+            )
+            if recordsToDelete.contains(where: { $0.id == id }) {
+                throw StoreError.storageLimitReached
+            }
         } catch {
-            snapshot.records.removeAll { $0.id == id }
-            digestLookup.removeValue(forKey: digest)
+            snapshot = previousSnapshot
+            rebuildDigestLookup()
             try? FileManager.default.removeItem(at: payloadURL)
             if let imageName { try? FileManager.default.removeItem(at: imagesURL.appendingPathComponent(imageName)) }
             if let thumbnailName { try? FileManager.default.removeItem(at: thumbnailsURL.appendingPathComponent(thumbnailName)) }
@@ -467,6 +500,15 @@ actor ClipStore {
         guard let encrypted = try? Data(contentsOf: thumbnailsURL.appendingPathComponent(name)),
               let data = try? crypto.open(encrypted) else { return nil }
         return data
+    }
+
+    func storageBytes() -> Int64 {
+        Self.storageBytes(
+            for: snapshot.records,
+            payloadsURL: payloadsURL,
+            imagesURL: imagesURL,
+            thumbnailsURL: thumbnailsURL
+        )
     }
 
     func setPinned(_ id: UUID, pinned: Bool) throws {
@@ -557,11 +599,13 @@ actor ClipStore {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
-    private static func applyHistoryLimit(to snapshot: inout Snapshot) throws -> [ClipRecord] {
-        guard snapshot.records.count > maximumStoredRecords else {
-            normalizeQueue(in: &snapshot, removedIDs: [])
-            return []
-        }
+    private static func applyLimits(
+        to snapshot: inout Snapshot,
+        storageLimitBytes: Int64,
+        payloadsURL: URL,
+        imagesURL: URL,
+        thumbnailsURL: URL
+    ) throws -> [ClipRecord] {
         var removed: [ClipRecord] = []
         while snapshot.records.count > maximumStoredRecords {
             guard let index = snapshot.records.lastIndex(where: { !$0.isPinned }) else {
@@ -569,8 +613,40 @@ actor ClipStore {
             }
             removed.append(snapshot.records.remove(at: index))
         }
+        while storageBytes(
+            for: snapshot.records,
+            payloadsURL: payloadsURL,
+            imagesURL: imagesURL,
+            thumbnailsURL: thumbnailsURL
+        ) > storageLimitBytes {
+            guard let index = snapshot.records.lastIndex(where: { !$0.isPinned }) else {
+                throw StoreError.storageLimitReached
+            }
+            removed.append(snapshot.records.remove(at: index))
+        }
         normalizeQueue(in: &snapshot, removedIDs: Set(removed.map(\.id)))
         return removed
+    }
+
+    private static func storageBytes(
+        for records: [ClipRecord],
+        payloadsURL: URL,
+        imagesURL: URL,
+        thumbnailsURL: URL
+    ) -> Int64 {
+        records.reduce(into: 0) { total, record in
+            total += fileSize(payloadsURL.appendingPathComponent(record.payloadFile))
+            if let imageFile = record.imageFile {
+                total += fileSize(imagesURL.appendingPathComponent(imageFile))
+            }
+            if let thumbnailFile = record.thumbnailFile {
+                total += fileSize(thumbnailsURL.appendingPathComponent(thumbnailFile))
+            }
+        }
+    }
+
+    private static func fileSize(_ url: URL) -> Int64 {
+        Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
     }
 
     private static func normalizeQueue(in snapshot: inout Snapshot, removedIDs: Set<UUID>) {

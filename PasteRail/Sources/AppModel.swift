@@ -57,6 +57,8 @@ final class AppModel: ObservableObject {
                 } catch {
                     if case ClipStore.StoreError.historyLimitReached = error {
                         self.errorMessage = "PasteRail stores up to 100 recent items. All current items are pinned, so the new item was not saved."
+                    } else if case ClipStore.StoreError.storageLimitReached = error {
+                        self.errorMessage = "PasteRail uses up to 500 MiB for clipboard files. Pinned items prevent enough space from being freed, so the new item was not saved."
                     } else {
                         self.errorMessage = "PasteRail could not safely store this clipboard item."
                     }

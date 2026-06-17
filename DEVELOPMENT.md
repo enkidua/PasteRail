@@ -24,8 +24,9 @@ required for the current target beyond the PasteRail MIT license.
 - AppKit pasteboard monitoring with item boundaries preserved
 - App-only local storage under `io.pasterail.PasteRail`
 - Atomic JSON index, previous-index backup, corrupt-index preservation, separate
-  payload/image/thumbnail files, private POSIX permissions, and guarded orphan cleanup
-- AES-256-GCM encryption for the index, payloads, original images, and thumbnails;
+  payload/thumbnail files, legacy image-file compatibility, private POSIX permissions,
+  and guarded orphan cleanup
+- AES-256-GCM encryption for the index, payloads, legacy original-image files, and thumbnails;
   the 256-bit key is stored in the macOS Keychain
 - No network libraries or remote services
 
@@ -125,14 +126,24 @@ overwriting malformed data.
 ## Capture limits
 
 - Empty string-only payloads are ignored.
-- Payloads larger than 100 MiB are ignored.
+- Payloads larger than 20 MiB are ignored before any store file is created.
 - Concealed and transient pasteboard types fail closed.
-- Images are normalized into separate PNG originals and thumbnails for storage.
+- Original image representations remain in the encrypted payload used for paste.
+  New records create only a separate encrypted PNG thumbnail of at most 160px;
+  they do not duplicate the full image as a normalized PNG. The optional
+  `imageFile` field and its migration, recovery, and deletion paths remain for
+  compatibility with existing encrypted stores.
 - PasteRail stores at most 100 recent history records. Pinned records count toward
   the same limit. When the limit is reached, the oldest unpinned record is removed
-  from the authenticated index, encrypted payload, original image, thumbnail, and
+  from the authenticated index, encrypted payload, any legacy original image, thumbnail, and
   paste queue after the replacement index is written. If all 100 records are pinned,
   the new capture is rejected and the user is notified.
+- Referenced encrypted payload, thumbnail, and legacy image files are limited to
+  500 MiB total. The oldest unpinned records are removed until both count and byte
+  limits are satisfied. Pinned records are never automatically removed. If pinned
+  records prevent enough space from being freed, the new record is rejected.
+  Pruning updates the authenticated index and queue before deleting old files;
+  index failure restores the previous in-memory state while old files remain.
 - Thumbnail previews are decrypted on demand and cached in memory for at most the
   30 most recently used records. The cache is cleared on memory-pressure warnings.
 
@@ -152,15 +163,40 @@ limits fail on the supported test Macs, storage must move to SQLite before OCR w
 
 ## Packaging
 
-Do not share a ZIP made from the whole project root. Review and distribution
-artifacts must be created only with `Scripts/package-source.sh`,
-`Scripts/package-universal.sh`, or `Scripts/package-review.sh`.
+Do not share a ZIP made from the whole project root. Do not upload files named
+like `PasteRail.zip` that were created by compressing the project folder. Root
+archives can include `.build`, `ModuleCache`, SwiftPM state, app bundles, logs,
+or other local build cache files.
+
+For review, sharing, or upload, use only the file produced by
+`Scripts/package-review.sh`: `PasteRail-0.1.0-review.zip`. The script prints the
+exact upload target as `Upload this file only: ...` after it validates the
+archive. `Scripts/verify-share-archive.sh` can be run on any candidate ZIP and
+fails if build caches, app bundles, dSYM files, logs, `.DS_Store`, or other
+forbidden artifacts are present.
+
+Source and application artifacts must be created only with
+`Scripts/package-source.sh`, `Scripts/package-universal.sh`, or
+`Scripts/package-review.sh`.
 
 `package-source.sh` creates a source-only archive from an allow-listed staging
 folder and fails if `.build`, `.swiftpm`, `DerivedData`, `ModuleCache`, dSYM
 bundles, app bundles, logs, user state, or the Universal app ZIP appear in the
 archive. `package-review.sh` creates a small review archive containing only the
-source ZIP, Universal app ZIP, README, development record, and privacy document.
+source ZIP, Universal app ZIP, README, development record, privacy document, and
+manual-test checklist.
+It removes any prior review ZIP before rebuilding, always runs source packaging
+before Universal packaging, rejects either artifact when a relevant source file is
+newer, and does not leave an older review ZIP available after a failed rebuild.
+Universal ZIP creation strips resource forks and extended attributes, rejects
+AppleDouble, `__MACOSX`, caches, logs, and dSYM content, and requires the archive
+to contain only `PasteRail.app`. CI reuses its already verified Universal build
+for this packaging check instead of compiling both architectures twice.
+
+`Scripts/package-dmg.sh` always rebuilds the Universal app, verifies its ad-hoc
+signature and both architectures, creates a DMG containing `PasteRail.app` and an
+Applications shortcut, and runs `hdiutil verify`. This is a local manual-test
+artifact only; it is neither Developer ID signed nor notarized.
 
 ## Manual UI verification checklist
 
@@ -174,7 +210,7 @@ source ZIP, Universal app ZIP, README, development record, and privacy document.
 
 ## Verification status
 
-Current status on June 16, 2026:
+Current status on June 17, 2026:
 
 - Release build: passed locally after removing stale `.build` and `.swiftpm`.
 - Universal 2 build: passed locally for `arm64` and `x86_64`.
@@ -182,11 +218,11 @@ Current status on June 16, 2026:
 - Temporary ad-hoc codesign verification: passed locally. This is not a Developer
   ID signature and is not notarization; Gatekeeper can still warn or block the app
   on other Macs.
-- Ordinary tests implemented: 59.
+- Ordinary tests implemented: 67.
 - Keychain integration tests implemented: 1 opt-in test.
 - Local tests executed: 0. Neither XCTest nor Swift Testing is present in the
   selected Command Line Tools installation.
-- GitHub Actions ordinary test gate: requires at least 59 executed ordinary tests.
+- GitHub Actions ordinary test gate: requires at least 67 executed ordinary tests.
 - Latest GitHub Actions CI for commit `70f4187` executed 59 ordinary tests with
   59 passed, 0 failed, and 0 skipped, then built and verified the Universal app.
 - Keychain integration testing remains opt-in and separate.
@@ -197,9 +233,20 @@ Current status on June 16, 2026:
   Silicon and produced a `PasteRail` process. It exited before termination was
   needed; clipboard and Accessibility workflows remain unverified.
 - Apple Silicon clipboard paste and Accessibility workflow: not verified.
+- June 17 storage-limit build: Debug, Release, Universal `arm64`/`x86_64`, strict
+  ad-hoc codesign, Universal ZIP structure, stale-archive replacement, and review
+  ZIP verification passed locally. The manual-test DMG was created and its
+  checksum passed `hdiutil verify` during `package-dmg.sh`.
+- The June 17 local `swift test --filter PasteRailTests` attempt compiled and
+  linked the app target but executed 0 tests because XCTest is unavailable in the
+  selected Command Line Tools. The 67-test suite has not passed locally.
+- The latest queried GitHub CI and CodeQL runs (`9729764`) succeeded on June 16,
+  but predate the 500 MiB limit and 67-test gate. A new CI run is required for the
+  current source. The latest CodeQL job completed init, manual Swift build, and
+  analyze successfully; this is historical, not validation of the current diff.
 
 CI now prints Xcode, Swift, and macOS SDK versions, reports executed, failed, and
-skipped test counts, and fails when fewer than 59 ordinary tests execute. It builds
+skipped test counts, and fails when fewer than 67 ordinary tests execute. It builds
 and verifies the Universal app, prints `lipo` and codesign results, and uploads only
 `PasteRail-0.1.0-universal.zip` as the
 `PasteRail-0.1.0-universal` artifact. Keychain integration tests run only through
@@ -215,6 +262,14 @@ confirms that access with a different key fails without replacing the encrypted
 index or payload.
 
 ## Verification history
+
+- On June 17, 2026, Debug application compilation/linking, Release compilation,
+  Universal `arm64`/`x86_64` assembly, `lipo`, strict ad-hoc codesign verification,
+  and review packaging passed with the image-storage and packaging changes. Local
+  `swift test` still executed 0 tests because the selected Command Line Tools does
+  not provide `XCTest`; this is not recorded as a test pass. The prior GitHub run
+  covered 59 tests, so CI must run the new 67-test suite before release validation
+  is current.
 
 - Earlier on June 15, 2026, the installed Swift compiler and SDK builds did not
   match, so package manifest compilation failed before source type checking.

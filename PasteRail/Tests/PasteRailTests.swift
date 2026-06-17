@@ -419,29 +419,151 @@ final class PasteRailTests: XCTestCase {
     }
 
     @MainActor
-    func testHistoryLimitDeletesImagePayloadOriginalAndThumbnail() async throws {
+    func testNewImageStoresPayloadAndThumbnailWithoutDuplicateOriginal() async throws {
         let store = try ClipStore(rootURL: root, keyStore: keyStore)
-        let oldImage = try await store.capture(
-            payload: imagePayload(color: .systemRed),
+        let payload = try imagePayload(color: .systemRed)
+        let image = try await store.capture(
+            payload: payload,
             kind: .image,
-            title: "old image",
-            searchText: "old image",
+            title: "image",
+            searchText: "image",
             sourceAppName: nil,
             sourceBundleIdentifier: nil
         )
-        let payloadURL = root.appendingPathComponent("Payloads/\(oldImage.payloadFile)")
-        let imageName = try XCTUnwrap(oldImage.imageFile)
-        let thumbnailName = try XCTUnwrap(oldImage.thumbnailFile)
-        let imageURL = root.appendingPathComponent("Images/\(imageName)")
+        let payloadURL = root.appendingPathComponent("Payloads/\(image.payloadFile)")
+        let thumbnailName = try XCTUnwrap(image.thumbnailFile)
         let thumbnailURL = root.appendingPathComponent("Thumbnails/\(thumbnailName)")
-        for index in 1..<101 {
-            _ = try await store.capture(payload: textPayload("fill \(index)"), kind: .text, title: "fill \(index)", searchText: "fill \(index)", sourceAppName: nil, sourceBundleIdentifier: nil)
+        let restoredPayload = try await store.loadPayload(for: image)
+
+        XCTAssertNil(image.imageFile)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: payloadURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: thumbnailURL.path))
+        XCTAssertEqual(restoredPayload, payload)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Images").path).isEmpty)
+    }
+
+    func testPayloadLargerThanTwentyMiBIsRejectedWithoutChangingStore() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        let oversized = ClipPayload(items: [[.init(
+            pasteboardType: NSPasteboard.PasteboardType.string.rawValue,
+            data: Data(repeating: 0x61, count: ClipStore.maximumPayloadBytes + 1)
+        )]])
+
+        do {
+            _ = try await store.capture(
+                payload: oversized,
+                kind: .text,
+                title: "oversized",
+                searchText: "oversized",
+                sourceAppName: nil,
+                sourceBundleIdentifier: nil
+            )
+            XCTFail("Expected oversized payload rejection")
+        } catch ClipStore.StoreError.payloadTooLarge {
+            // Expected.
         }
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: payloadURL.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: imageURL.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: thumbnailURL.path))
-        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Payloads").path).count, ClipStore.maximumStoredRecords)
+        let records = await store.records()
+        XCTAssertTrue(records.isEmpty)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Payloads").path).isEmpty)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Images").path).isEmpty)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Thumbnails").path).isEmpty)
+    }
+
+    func testStorageLimitAtExactBoundaryKeepsRecord() async throws {
+        let seed = try ClipStore(rootURL: root, keyStore: keyStore)
+        let record = try await seed.capture(payload: sizedTextPayload(byteCount: 1_024, marker: 0x41), kind: .text, title: "boundary", searchText: "boundary", sourceAppName: nil, sourceBundleIdentifier: nil)
+        let exactSize = await seed.storageBytes()
+
+        let reopened = try ClipStore(rootURL: root, keyStore: keyStore, storageLimitBytes: exactSize)
+        let records = await reopened.records()
+        let reopenedSize = await reopened.storageBytes()
+
+        XCTAssertEqual(records.map(\.id), [record.id])
+        XCTAssertEqual(reopenedSize, exactSize)
+    }
+
+    func testStorageLimitRemovesOldestUnpinnedAndQueuedEntry() async throws {
+        let seed = try ClipStore(rootURL: root, keyStore: keyStore)
+        let oldest = try await seed.capture(payload: sizedTextPayload(byteCount: 1_024, marker: 0x41), kind: .text, title: "oldest", searchText: "oldest", sourceAppName: nil, sourceBundleIdentifier: nil)
+        try await seed.enqueue([oldest.id])
+        let oneRecordSize = await seed.storageBytes()
+        let limited = try ClipStore(rootURL: root, keyStore: keyStore, storageLimitBytes: oneRecordSize + 64)
+
+        let newest = try await limited.capture(payload: sizedTextPayload(byteCount: 1_024, marker: 0x42), kind: .text, title: "newest", searchText: "newest", sourceAppName: nil, sourceBundleIdentifier: nil)
+        let records = await limited.records()
+        let queue = await limited.queueState()
+
+        XCTAssertEqual(records.map(\.id), [newest.id])
+        XCTAssertTrue(queue.0.isEmpty)
+        XCTAssertEqual(queue.1, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("Payloads/\(oldest.payloadFile)").path))
+    }
+
+    func testStorageLimitDoesNotDeletePinnedRecordAndRejectsNewRecord() async throws {
+        let seed = try ClipStore(rootURL: root, keyStore: keyStore)
+        let pinned = try await seed.capture(payload: sizedTextPayload(byteCount: 1_024, marker: 0x41), kind: .text, title: "pinned", searchText: "pinned", sourceAppName: nil, sourceBundleIdentifier: nil)
+        try await seed.setPinned(pinned.id, pinned: true)
+        let oneRecordSize = await seed.storageBytes()
+        let limited = try ClipStore(rootURL: root, keyStore: keyStore, storageLimitBytes: oneRecordSize + 64)
+
+        await XCTAssertThrowsAsyncError {
+            _ = try await limited.capture(payload: self.sizedTextPayload(byteCount: 1_024, marker: 0x42), kind: .text, title: "blocked", searchText: "blocked", sourceAppName: nil, sourceBundleIdentifier: nil)
+        }
+
+        let records = await limited.records()
+        XCTAssertEqual(records.map(\.id), [pinned.id])
+        XCTAssertTrue(records[0].isPinned)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("Payloads/\(pinned.payloadFile)").path))
+    }
+
+    func testStorageLimitPersistFailureRollsBackRecordsQueueAndFiles() async throws {
+        let seed = try ClipStore(rootURL: root, keyStore: keyStore)
+        let oldest = try await seed.capture(payload: sizedTextPayload(byteCount: 1_024, marker: 0x41), kind: .text, title: "oldest", searchText: "oldest", sourceAppName: nil, sourceBundleIdentifier: nil)
+        try await seed.enqueue([oldest.id])
+        let oneRecordSize = await seed.storageBytes()
+        let payloadsBefore = Set(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Payloads").path))
+        let failure = FileOperationFailure(.beforeHistoryLimitPersist)
+        let limited = try ClipStore(
+            rootURL: root,
+            keyStore: keyStore,
+            storageLimitBytes: oneRecordSize + 64,
+            fileOperationInjector: { try failure.check($0) }
+        )
+
+        await XCTAssertThrowsAsyncError {
+            _ = try await limited.capture(payload: self.sizedTextPayload(byteCount: 1_024, marker: 0x42), kind: .text, title: "new", searchText: "new", sourceAppName: nil, sourceBundleIdentifier: nil)
+        }
+
+        let records = await limited.records()
+        let queue = await limited.queueState()
+        let payloadsAfter = Set(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Payloads").path))
+        XCTAssertEqual(records.map(\.id), [oldest.id])
+        XCTAssertEqual(queue.0.map(\.clipID), [oldest.id])
+        XCTAssertEqual(queue.1, 0)
+        XCTAssertEqual(payloadsAfter, payloadsBefore)
+    }
+
+    func testStartupSafelyPrunesStoreAboveStorageLimit() async throws {
+        let seed = try ClipStore(rootURL: root, keyStore: keyStore)
+        let first = try await seed.capture(payload: sizedTextPayload(byteCount: 1_024, marker: 0x41), kind: .text, title: "first", searchText: "first", sourceAppName: nil, sourceBundleIdentifier: nil)
+        let second = try await seed.capture(payload: sizedTextPayload(byteCount: 1_024, marker: 0x42), kind: .text, title: "second", searchText: "second", sourceAppName: nil, sourceBundleIdentifier: nil)
+        let newest = try await seed.capture(payload: sizedTextPayload(byteCount: 1_024, marker: 0x43), kind: .text, title: "newest", searchText: "newest", sourceAppName: nil, sourceBundleIdentifier: nil)
+        try await seed.enqueue([first.id, second.id, newest.id])
+        let newestSize = Int64(try XCTUnwrap(
+            root.appendingPathComponent("Payloads/\(newest.payloadFile)")
+                .resourceValues(forKeys: [.fileSizeKey]).fileSize
+        ))
+
+        let reopened = try ClipStore(rootURL: root, keyStore: keyStore, storageLimitBytes: newestSize)
+        let records = await reopened.records()
+        let queue = await reopened.queueState()
+
+        XCTAssertEqual(records.map(\.id), [newest.id])
+        XCTAssertEqual(queue.0.map(\.clipID), [newest.id])
+        XCTAssertEqual(queue.1, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("Payloads/\(first.payloadFile)").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("Payloads/\(second.payloadFile)").path))
     }
 
     func testHistoryLimitRemovesDeletedRecordsFromQueueAndNormalizesIndex() async throws {
@@ -544,13 +666,53 @@ final class PasteRailTests: XCTestCase {
     }
 
     @MainActor
-    func testInternalClipboardWriteIsIgnoredOnce() {
+    func testInternalClipboardWriteIsNotRecaptured() {
         let board = NSPasteboard.withUniqueName()
-        let monitor = PasteboardMonitor(pasteboard: board) { _, _, _, _, _ in }
+        let source = SourceApplication(name: "TextEdit", bundleIdentifier: "com.apple.TextEdit", processIdentifier: 1)
+        var captures = 0
+        let monitor = PasteboardMonitor(pasteboard: board, initialSource: source, usesSystemInitialSource: false) { _, _, _, _, _ in
+            captures += 1
+        }
         board.setString("internal", forType: .string)
         monitor.markInternalWrite()
-        XCTAssertTrue(monitor.shouldIgnoreChange(count: board.changeCount))
-        XCTAssertFalse(monitor.shouldIgnoreChange(count: board.changeCount))
+        monitor.handleActivation(source)
+        XCTAssertEqual(captures, 0)
+    }
+
+    @MainActor
+    func testRepeatedInternalClipboardWritesDoNotAccumulateTrackingState() {
+        let board = NSPasteboard.withUniqueName()
+        let source = SourceApplication(name: "TextEdit", bundleIdentifier: "com.apple.TextEdit", processIdentifier: 1)
+        var captures = 0
+        let monitor = PasteboardMonitor(pasteboard: board, initialSource: source, usesSystemInitialSource: false) { _, _, _, _, _ in
+            captures += 1
+        }
+
+        for index in 0..<1_000 {
+            board.setString("internal \(index)", forType: .string)
+            monitor.markInternalWrite()
+            monitor.handleActivation(source)
+        }
+
+        XCTAssertEqual(captures, 0)
+        XCTAssertEqual(monitor.internalWriteTrackingCountForTesting, 0)
+    }
+
+    @MainActor
+    func testExternalClipboardChangeAfterInternalWriteIsCaptured() {
+        let board = NSPasteboard.withUniqueName()
+        let source = SourceApplication(name: "TextEdit", bundleIdentifier: "com.apple.TextEdit", processIdentifier: 1)
+        var capturedText: String?
+        let monitor = PasteboardMonitor(pasteboard: board, initialSource: source, usesSystemInitialSource: false) { payload, _, _, _, _ in
+            capturedText = payload.plainText
+        }
+
+        board.setString("internal", forType: .string)
+        monitor.markInternalWrite()
+        board.setString("external", forType: .string)
+        monitor.handleActivation(source)
+
+        XCTAssertEqual(capturedText, "external")
     }
 
     @MainActor
@@ -997,6 +1159,13 @@ final class PasteRailTests: XCTestCase {
 
     private func textPayload(_ text: String) -> ClipPayload {
         ClipPayload(items: [[.init(pasteboardType: NSPasteboard.PasteboardType.string.rawValue, data: Data(text.utf8))]])
+    }
+
+    private func sizedTextPayload(byteCount: Int, marker: UInt8) -> ClipPayload {
+        ClipPayload(items: [[.init(
+            pasteboardType: NSPasteboard.PasteboardType.string.rawValue,
+            data: Data(repeating: marker, count: byteCount)
+        )]])
     }
 
     @MainActor

@@ -3,17 +3,17 @@ import Foundation
 
 @MainActor
 final class PasteboardMonitor {
-    static let maximumCaptureBytes = 100 * 1024 * 1024
+    static let maximumCaptureBytes = 20 * 1024 * 1024
     private let pasteboard: NSPasteboard
     private let policy: SecurityPolicy
     private let onCapture: @MainActor (ClipPayload, ClipKind, String, String, SourceApplication) -> Void
     private var timer: Timer?
     private var observerToken: NSObjectProtocol?
     private var lastChangeCount: Int
-    private var internalWriteCounts = Set<Int>()
     private var sourceCandidate: SourceApplication?
     private(set) var isStarted = false
     var sourceCandidateForTesting: SourceApplication? { sourceCandidate }
+    var internalWriteTrackingCountForTesting: Int { 0 }
 
     init(
         pasteboard: NSPasteboard = .general,
@@ -58,12 +58,7 @@ final class PasteboardMonitor {
     }
 
     func markInternalWrite() {
-        internalWriteCounts.insert(pasteboard.changeCount)
         lastChangeCount = pasteboard.changeCount
-    }
-
-    func shouldIgnoreChange(count: Int) -> Bool {
-        internalWriteCounts.remove(count) != nil
     }
 
     func handleActivation(_ newApplication: SourceApplication) {
@@ -85,9 +80,6 @@ final class PasteboardMonitor {
         let changeDelta = newCount - lastChangeCount
         lastChangeCount = newCount
         guard changeDelta == 1 else { return }
-        if shouldIgnoreChange(count: lastChangeCount) {
-            return
-        }
         guard let source else { return }
         let typeNames = Self.allTypeNames(in: pasteboard)
         guard policy.decision(types: typeNames, sourceBundleIdentifier: source.bundleIdentifier) == .capture else { return }

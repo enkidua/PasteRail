@@ -40,8 +40,8 @@ jobs:
           echo "Passed tests: $passed"
           echo "Failed tests: $failures"
           echo "Skipped tests: $skipped"
-          if (( executed < 59 )); then
-            echo "Expected at least 59 ordinary tests, but only $executed executed."
+          if (( executed < 67 )); then
+            echo "Expected at least 67 ordinary tests, but only $executed executed."
             exit 1
           fi
           if (( failures > 0 )); then exit 1; fi
@@ -59,11 +59,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 ".build/universal/PasteRail.app"
           test "$(defaults read "$PWD/.build/universal/PasteRail.app/Contents/Info" CFBundleIdentifier)" = "io.pasterail.PasteRail"
       - name: Package Universal app
-        run: |
-          rm -f PasteRail-0.1.0-universal.zip
-          ditto -c -k --sequesterRsrc --keepParent \
-            ".build/universal/PasteRail.app" \
-            "PasteRail-0.1.0-universal.zip"
+        run: ./Scripts/package-universal.sh 0.1.0 --reuse-build
       - name: Upload Universal app
         uses: actions/upload-artifact@v4
         with:

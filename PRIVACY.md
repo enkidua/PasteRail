@@ -15,14 +15,24 @@ SDK, or telemetry SDK.
 
 ## Local storage
 
-History metadata, clipboard payloads, images, and thumbnails are stored under:
+History metadata, clipboard payloads, and thumbnails are stored under:
 
 `~/Library/Application Support/io.pasterail.PasteRail`
 
 The storage directory is restricted to the current user. Clipboard payloads,
-original images, thumbnails, and the metadata index containing titles and search
-text are encrypted with AES-256-GCM. The encryption key is generated locally and
-stored in the macOS Keychain as a device-only application secret.
+including original image representations, thumbnails, and the metadata index
+containing titles and search text are encrypted with AES-256-GCM. New image
+records do not create a second full-size PNG file. Legacy encrypted original-image
+files remain readable and are retained or removed with their owning records. The
+encryption key is generated locally and stored in the macOS Keychain as a
+device-only application secret.
+
+PasteRail stores at most 100 records, accepts at most 20 MiB of original clipboard
+payload per record, and limits referenced encrypted payload, thumbnail, and legacy
+image files to 500 MiB total. To make room it removes the oldest unpinned records;
+pinned records are never removed automatically. If pinned records prevent enough
+space from being freed, the new clipboard record is rejected and existing data is
+preserved.
 
 Index writes are atomic, the previous encrypted index is retained as a backup, and
 a damaged index or ciphertext is preserved for recovery rather than silently
