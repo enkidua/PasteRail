@@ -13,9 +13,10 @@ if ! swift -Xcc "-fmodules-cache-path=$CHECK_CACHE" -e 'import XCTest; print("XC
 XCTest is not available in this Swift toolchain.
 
 PasteRail's ordinary test suite currently uses XCTest and is expected to run in
-GitHub Actions or a full Xcode environment. The Command Line Tools-only
-environment can still build the app and create the manual-test DMG, but it cannot
-execute these XCTest targets locally.
+GitHub Actions or a full Xcode environment. Command Line Tools for the macOS 15
+SDK can still build the app and create the manual-test DMG, but cannot execute
+these XCTest targets. Command Line Tools for the macOS 27 SDK cannot build the
+SwiftUI panel either, so install Xcode for local builds there.
 
 Use these commands for local build/package verification:
 

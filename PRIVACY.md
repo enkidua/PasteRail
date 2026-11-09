@@ -19,6 +19,9 @@ History metadata, clipboard payloads, and thumbnails are stored under:
 
 `~/Library/Application Support/PasteRail`
 
+The first test build used `~/Library/Application Support/io.pasterail.PasteRail`
+with a Keychain-backed key. Current builds never read or write that directory.
+
 The storage directory is restricted to the current user. Clipboard payloads,
 including original image representations, thumbnails, and the metadata index
 containing titles and search text are encrypted with AES-256-GCM. New image
@@ -78,8 +81,10 @@ Command-V. If permission is unavailable, PasteRail does not alter the clipboard.
 ## Resetting local data
 
 The menu bar item `Reset PasteRail Data` deletes
-`~/Library/Application Support/PasteRail` after confirmation. It does not remove
-Keychain items from older test builds. If you want to remove a legacy test
+`~/Library/Application Support/PasteRail` after confirmation. It also deletes
+`~/Library/Application Support/io.pasterail.PasteRail` if the first test build left
+data there. Both folder names are checked before anything is deleted. Reset does not
+remove Keychain items from older test builds. If you want to remove a legacy test
 Keychain entry manually, use Keychain Access or a command such as:
 
 ```sh

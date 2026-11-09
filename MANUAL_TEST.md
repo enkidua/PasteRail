@@ -36,6 +36,7 @@ app has an ad-hoc signature and is not Developer ID signed or notarized.
 - [ ] Install the same build again and confirm existing encrypted history opens without Keychain prompts.
 - [ ] If older Keychain-backed test-build data exists, confirm PasteRail shows a recoverable storage message instead of crashing.
 - [ ] Use `Reset PasteRail Data`, confirm the warning dialog appears, and verify `~/Library/Application Support/PasteRail` is removed only after confirmation.
+- [ ] If `~/Library/Application Support/io.pasterail.PasteRail` exists from the first test build, confirm reset removes it too.
 - [ ] After reset, copy a new text item and confirm history can be stored again.
 - [ ] Reset while the clipboard panel is open and confirm the panel closes, then confirm the shortcuts and menu items still work.
 - [ ] Confirm any Gatekeeper warning is understood as unsigned/notarization status, not a Keychain prompt.
@@ -46,6 +47,7 @@ app has an ad-hoc signature and is not Developer ID signed or notarized.
 
 - [ ] Copy and record plain text, a URL, RTF content, and a file reference.
 - [ ] Copy and record PNG, JPEG, and TIFF images.
+- [ ] Copy text from Microsoft Word or Excel and from an Electron app such as VS Code or Slack. Confirm each copy is recorded. PasteRail ignores a clipboard change that advances the change count by more than one, so note any app whose copies never appear.
 - [ ] Confirm image thumbnails appear without loading full originals in the list.
 - [ ] Scroll the single history list with a mouse wheel or trackpad.
 - [ ] Search history and exercise every type filter.

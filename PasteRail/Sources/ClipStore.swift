@@ -25,6 +25,9 @@ actor ClipStore {
     static let maximumPayloadBytes = 20 * 1024 * 1024
     static let maximumStorageBytes: Int64 = 500 * 1024 * 1024
     static let applicationSupportDirectoryName = "PasteRail"
+    /// Directory used by the first test build, which keyed its data with the Keychain.
+    /// Current builds never read it; Reset PasteRail Data removes it.
+    static let legacyApplicationSupportDirectoryName = "io.pasterail.PasteRail"
 
     private struct BootstrapResult {
         var snapshot: Snapshot
@@ -163,10 +166,20 @@ actor ClipStore {
     }
 
     static func defaultRootURL(fileManager: FileManager = .default) throws -> URL {
+        try applicationSupportURL(fileManager: fileManager)
+            .appendingPathComponent(applicationSupportDirectoryName, isDirectory: true)
+    }
+
+    static func legacyRootURL(fileManager: FileManager = .default) throws -> URL {
+        try applicationSupportURL(fileManager: fileManager)
+            .appendingPathComponent(legacyApplicationSupportDirectoryName, isDirectory: true)
+    }
+
+    private static func applicationSupportURL(fileManager: FileManager) throws -> URL {
         guard let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             throw StoreError.invalidContainer
         }
-        return support.appendingPathComponent(applicationSupportDirectoryName, isDirectory: true)
+        return support
     }
 
     static func defaultKeyStore(rootURL: URL) -> EncryptionKeyStore {
@@ -178,16 +191,31 @@ actor ClipStore {
         }
     }
 
-    static func resetApplicationData(rootURL: URL? = nil) throws {
-        let target = try (rootURL ?? defaultRootURL()).standardizedFileURL
-        guard target.lastPathComponent == applicationSupportDirectoryName,
+    /// Deletes the current store and the first test build's directory.
+    static func resetApplicationData() throws {
+        try resetApplicationData(rootURL: defaultRootURL(), legacyRootURL: legacyRootURL())
+    }
+
+    /// Validates every target before deleting any of them, so an unexpected path
+    /// leaves all data in place.
+    static func resetApplicationData(rootURL: URL, legacyRootURL: URL? = nil) throws {
+        var targets = [try resetTarget(rootURL, expectedName: applicationSupportDirectoryName)]
+        if let legacyRootURL {
+            targets.append(try resetTarget(legacyRootURL, expectedName: legacyApplicationSupportDirectoryName))
+        }
+        for target in targets where FileManager.default.fileExists(atPath: target.path) {
+            try FileManager.default.removeItem(at: target)
+        }
+    }
+
+    private static func resetTarget(_ url: URL, expectedName: String) throws -> URL {
+        let target = url.standardizedFileURL
+        guard target.lastPathComponent == expectedName,
               !target.path.isEmpty,
               target.path != "/" else {
             throw StoreError.invalidContainer
         }
-        if FileManager.default.fileExists(atPath: target.path) {
-            try FileManager.default.removeItem(at: target)
-        }
+        return target
     }
 
     private static func bootstrap(

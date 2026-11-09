@@ -95,6 +95,37 @@ final class PasteRailTests: XCTestCase {
         XCTAssertThrowsError(try ClipStore.resetApplicationData(rootURL: root.appendingPathComponent("NotPasteRail", isDirectory: true)))
     }
 
+    func testResetApplicationDataAlsoRemovesFirstBuildDirectory() throws {
+        let current = root.appendingPathComponent(ClipStore.applicationSupportDirectoryName, isDirectory: true)
+        let legacy = root.appendingPathComponent(ClipStore.legacyApplicationSupportDirectoryName, isDirectory: true)
+        let outside = root.appendingPathComponent("outside.txt")
+        for directory in [current, legacy] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data("history".utf8).write(to: directory.appendingPathComponent("history.enc"))
+        }
+        try Data("outside".utf8).write(to: outside)
+
+        try ClipStore.resetApplicationData(rootURL: current, legacyRootURL: legacy)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: current.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outside.path))
+        XCTAssertNoThrow(try ClipStore.resetApplicationData(rootURL: current, legacyRootURL: legacy))
+    }
+
+    func testResetApplicationDataDeletesNothingWhenLegacyPathIsUnexpected() throws {
+        let current = root.appendingPathComponent(ClipStore.applicationSupportDirectoryName, isDirectory: true)
+        let unexpected = root.appendingPathComponent("Documents", isDirectory: true)
+        for directory in [current, unexpected] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+
+        XCTAssertThrowsError(try ClipStore.resetApplicationData(rootURL: current, legacyRootURL: unexpected))
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: current.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unexpected.path))
+    }
+
     func testUpdateReopensExistingEncryptedHistoryWithSameKeyWithoutReplacingData() async throws {
         let stableKeyStore = MemoryKeyStore()
         let previousBuildStore = try ClipStore(rootURL: root, keyStore: stableKeyStore)

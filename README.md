@@ -44,8 +44,11 @@ Run tests in a full Xcode/XCTest environment:
 
 PasteRail's current automated tests use XCTest. On some macOS Command Line
 Tools-only installations, `swift test` cannot import `XCTest`; in that case local
-test execution fails by design and GitHub Actions is the test authority. This does
-not block local app builds or manual-test DMG creation.
+test execution fails by design and GitHub Actions is the test authority.
+
+With Command Line Tools for the macOS 27 SDK, `swift build` also fails. SwiftUI
+`@State` and `@FocusState` became macros there, and their plugin ships only with
+Xcode. Install Xcode to build the app or create the manual-test DMG on such a Mac.
 
 Build a local Universal 2 application:
 
