@@ -218,7 +218,7 @@ final class HotKey {
         print("Hotkey registration success: id \(id)")
     }
 
-    static func shouldHandleEvent(expectedID: UInt32, actualID: UInt32) -> Bool {
+    nonisolated static func shouldHandleEvent(expectedID: UInt32, actualID: UInt32) -> Bool {
         expectedID == actualID
     }
 
