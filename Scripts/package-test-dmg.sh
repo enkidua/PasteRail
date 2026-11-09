@@ -15,7 +15,7 @@ trap cleanup EXIT
 rm -f "$DMG"
 "$ROOT/Scripts/build-universal.sh"
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "io.pasterail.PasteRail"
-lipo "$APP/Contents/MacOS/PasteRail" -verify_arch arm64 x86_64
+for arch in arm64 x86_64; do lipo "$APP/Contents/MacOS/PasteRail" -verify_arch "$arch"; done
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 ditto --norsrc --noextattr "$APP" "$STAGING/PasteRail.app"

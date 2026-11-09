@@ -54,7 +54,7 @@ jobs:
       - name: Verify application
         run: |
           binary=".build/universal/PasteRail.app/Contents/MacOS/PasteRail"
-          lipo "$binary" -verify_arch arm64 x86_64
+          for arch in arm64 x86_64; do lipo "$binary" -verify_arch "$arch"; done
           lipo -info "$binary"
           codesign --verify --deep --strict --verbose=2 ".build/universal/PasteRail.app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' ".build/universal/PasteRail.app/Contents/Info.plist")" = "io.pasterail.PasteRail"

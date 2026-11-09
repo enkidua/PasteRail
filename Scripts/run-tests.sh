@@ -15,8 +15,9 @@ XCTest is not available in this Swift toolchain.
 PasteRail's ordinary test suite currently uses XCTest and is expected to run in
 GitHub Actions or a full Xcode environment. Command Line Tools for the macOS 15
 SDK can still build the app and create the manual-test DMG, but cannot execute
-these XCTest targets. Command Line Tools for the macOS 27 SDK cannot build the
-SwiftUI panel either, so install Xcode for local builds there.
+these XCTest targets. With Command Line Tools for the macOS 27 SDK, also set
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk for app builds,
+because SwiftUI's macros there need Xcode's plugin.
 
 Use these commands for local build/package verification:
 

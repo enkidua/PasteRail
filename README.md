@@ -48,7 +48,12 @@ test execution fails by design and GitHub Actions is the test authority.
 
 With Command Line Tools for the macOS 27 SDK, `swift build` also fails. SwiftUI
 `@State` and `@FocusState` became macros there, and their plugin ships only with
-Xcode. Install Xcode to build the app or create the manual-test DMG on such a Mac.
+Xcode. The same Command Line Tools also install the macOS 26 SDK, which still
+builds the app without Xcode:
+
+```sh
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk ./Scripts/package-dmg.sh
+```
 
 Build a local Universal 2 application:
 

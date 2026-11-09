@@ -245,8 +245,9 @@ Current status on June 17, 2026:
   scripts do not call this script by default, so a Command Line Tools-only machine
   with the macOS 15 SDK can still build the app and create a manual-test DMG. With
   Command Line Tools for the macOS 27 SDK, `swift build` fails in `PanelView.swift`
-  because SwiftUI `@State` and `@FocusState` need Xcode's SwiftUIMacros plugin, so
-  local builds and DMG creation need Xcode there.
+  because SwiftUI `@State` and `@FocusState` need Xcode's SwiftUIMacros plugin.
+  There, set `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk`, which
+  the same Command Line Tools install, or use Xcode.
 - GitHub Actions ordinary test gate: requires at least 97 executed ordinary tests.
 - Latest GitHub Actions CI for commit `70f4187` executed 59 ordinary tests with
   59 passed, 0 failed, and 0 skipped, then built and verified the Universal app.
@@ -288,9 +289,9 @@ Current status on June 17, 2026:
   manual app execution verification.
 - June 26 local packaging path: `build-universal.sh`, `package-universal.sh`,
   `package-review.sh`, and `package-dmg.sh` use build/sign/package verification
-  only; they do not require XCTest. They still need a toolchain that can compile
-  SwiftUI, which means Xcode when the selected SDK is macOS 27. The recommended
-  local manual-test sequence is:
+  only; they do not require XCTest. They still need an SDK whose SwiftUI compiles
+  without Xcode's macro plugin; when the selected SDK is macOS 27, set `SDKROOT` to
+  the macOS 26 SDK or use Xcode. The recommended local manual-test sequence is:
 
   ```sh
   rm -rf .build .swiftpm
@@ -372,6 +373,17 @@ Current status on June 17, 2026:
   records and for indexes read by older builds. A redundant arrow-key branch was
   removed from the panel key handler. No behavior change is intended, and the test
   count stays at 97.
+- November 10 local app build: with Command Line Tools only (Swift 6.4),
+  `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk
+  ./Scripts/package-dmg.sh` built the unmodified sources for `arm64` and `x86_64`,
+  produced an ad-hoc signed Universal app with a macOS 13 minimum, passed strict
+  codesign verification, and created a DMG that passed `hdiutil verify`. Two script
+  fixes were needed. Swift 6.4's build system writes binaries to
+  `out/Products/Release` instead of `<triple>/release`, so `build-universal.sh` now
+  asks `swift build --show-bin-path`. Its `lipo` accepts one architecture per
+  `-verify_arch`, so the scripts and CI now check `arm64` and `x86_64` separately.
+  The `x86_64` link warns that `libswiftCompatibilityPacks.a` has no `x86_64` slice;
+  linking succeeded, but the app has not been launched on an Intel Mac.
 
 CI now prints Xcode, Swift, and macOS SDK versions, reports executed, failed, and
 skipped test counts, and fails when fewer than 97 ordinary tests execute. It builds
