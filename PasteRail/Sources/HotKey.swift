@@ -197,12 +197,12 @@ final class HotKey {
                 &hotKeyID
             )
             guard parameterStatus == noErr else {
-                print("Hotkey event ignored: failed to read EventHotKeyID \(parameterStatus)")
+                PasteRailLog.hotKey.debug("Hotkey event ignored: failed to read EventHotKeyID \(parameterStatus, privacy: .public)")
                 return OSStatus(eventNotHandledErr)
             }
             let instance = Unmanaged<HotKey>.fromOpaque(userData).takeUnretainedValue()
             guard HotKey.shouldHandleEvent(expectedID: instance.expectedID, actualID: hotKeyID.id) else {
-                print("Hotkey event ignored: expected id \(instance.expectedID), received id \(hotKeyID.id)")
+                PasteRailLog.hotKey.debug("Hotkey event ignored: expected id \(instance.expectedID, privacy: .public), received id \(hotKeyID.id, privacy: .public)")
                 return OSStatus(eventNotHandledErr)
             }
             Task { @MainActor in instance.action() }
@@ -212,10 +212,10 @@ final class HotKey {
         let hotKeyID = EventHotKeyID(signature: OSType(0x5052414C), id: id)
         let registerStatus = RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &reference)
         guard registerStatus == noErr else {
-            print("Hotkey registration failure: \(registerStatus)")
+            PasteRailLog.hotKey.error("Hotkey registration failed: \(registerStatus, privacy: .public)")
             throw HotKeyError.register(registerStatus)
         }
-        print("Hotkey registration success: id \(id)")
+        PasteRailLog.hotKey.info("Hotkey registered: id \(id, privacy: .public)")
     }
 
     nonisolated static func shouldHandleEvent(expectedID: UInt32, actualID: UInt32) -> Bool {

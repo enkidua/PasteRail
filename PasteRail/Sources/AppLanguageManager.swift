@@ -133,8 +133,6 @@ final class AppLanguageManager: ObservableObject {
         case (.korean, .clear): "비우기"
         case (.english, .unknownApplication): "Unknown application"
         case (.korean, .unknownApplication): "알 수 없는 앱"
-        case (.english, .sensitiveContent): "Sensitive content"
-        case (.korean, .sensitiveContent): "민감한 내용"
         case (.english, .selectForQueue): "Select for queue"
         case (.korean, .selectForQueue): "큐 선택"
         case (.english, .removeFromQueueSelection): "Remove from queue selection"
@@ -276,7 +274,6 @@ final class AppLanguageManager: ObservableObject {
         case pasteNext
         case clear
         case unknownApplication
-        case sensitiveContent
         case selectForQueue
         case removeFromQueueSelection
         case selectForQueueHint

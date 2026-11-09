@@ -354,6 +354,9 @@ actor ClipStore {
         return try JSONDecoder.pasteRail.decode(ClipPayload.self, from: crypto.open(encrypted))
     }
 
+    /// Encrypts and writes the index after keeping the previous index as a backup.
+    /// Returns the encrypted index size.
+    @discardableResult
     private static func persistSnapshot(
         _ snapshot: Snapshot,
         indexURL: URL,
@@ -361,7 +364,7 @@ actor ClipStore {
         crypto: CryptoStore,
         persistenceFailureInjector: (@Sendable () throws -> Void)?,
         fileOperationInjector: (@Sendable (ClipStoreFileOperation) throws -> Void)?
-    ) throws {
+    ) throws -> Int64 {
         try persistenceFailureInjector?()
         let data = try crypto.seal(JSONEncoder.pasteRail.encode(snapshot))
         try replaceBackup(
@@ -372,6 +375,7 @@ actor ClipStore {
         )
         try fileOperationInjector?(.beforeIndexWrite)
         try writePrivate(data, to: indexURL)
+        return Int64(data.count)
     }
 
     private static func replaceBackup(
@@ -475,20 +479,18 @@ actor ClipStore {
         let id = UUID()
         let payloadName = "\(id.uuidString).json"
         let payloadURL = payloadsURL.appendingPathComponent(payloadName)
-        try atomicWrite(try crypto.seal(JSONEncoder.pasteRail.encode(payload)), to: payloadURL)
+        try Self.writePrivate(try crypto.seal(JSONEncoder.pasteRail.encode(payload)), to: payloadURL)
 
-        let imageName: String? = nil
         var thumbnailName: String?
         do {
             if kind == .image, let imageData = preferredImageData(in: payload) {
                 let decoded = NSImage(data: imageData)
                 guard let decoded else { throw StoreError.invalidImage }
                 thumbnailName = "\(id.uuidString).png"
-                try atomicWrite(try crypto.seal(pngData(from: decoded, maximumDimension: 160)), to: thumbnailsURL.appendingPathComponent(thumbnailName!))
+                try Self.writePrivate(try crypto.seal(pngData(from: decoded, maximumDimension: 160)), to: thumbnailsURL.appendingPathComponent(thumbnailName!))
             }
         } catch {
             try? FileManager.default.removeItem(at: payloadURL)
-            if let imageName { try? FileManager.default.removeItem(at: imagesURL.appendingPathComponent(imageName)) }
             if let thumbnailName { try? FileManager.default.removeItem(at: thumbnailsURL.appendingPathComponent(thumbnailName)) }
             throw error
         }
@@ -502,7 +504,7 @@ actor ClipStore {
             sourceAppName: sourceAppName,
             sourceBundleIdentifier: sourceBundleIdentifier,
             payloadFile: payloadName,
-            imageFile: imageName,
+            imageFile: nil,
             thumbnailFile: thumbnailName,
             digest: digest,
             isSensitive: false,
@@ -527,7 +529,6 @@ actor ClipStore {
             snapshot = previousSnapshot
             rebuildDigestLookup()
             try? FileManager.default.removeItem(at: payloadURL)
-            if let imageName { try? FileManager.default.removeItem(at: imagesURL.appendingPathComponent(imageName)) }
             if let thumbnailName { try? FileManager.default.removeItem(at: thumbnailsURL.appendingPathComponent(thumbnailName)) }
             throw error
         }
@@ -541,7 +542,6 @@ actor ClipStore {
             snapshot = previousSnapshot
             rebuildDigestLookup()
             try? FileManager.default.removeItem(at: payloadURL)
-            if let imageName { try? FileManager.default.removeItem(at: imagesURL.appendingPathComponent(imageName)) }
             if let thumbnailName { try? FileManager.default.removeItem(at: thumbnailsURL.appendingPathComponent(thumbnailName)) }
             throw error
         }
@@ -628,17 +628,14 @@ actor ClipStore {
     }
 
     private func persist() throws {
-        try persistenceFailureInjector?()
-        let encoded = try crypto.seal(JSONEncoder.pasteRail.encode(snapshot))
-        try Self.replaceBackup(
-            from: indexURL,
-            at: backupURL,
+        performanceMetrics.indexBytes = try Self.persistSnapshot(
+            snapshot,
+            indexURL: indexURL,
+            backupURL: backupURL,
             crypto: crypto,
+            persistenceFailureInjector: persistenceFailureInjector,
             fileOperationInjector: fileOperationInjector
         )
-        try fileOperationInjector?(.beforeIndexWrite)
-        try atomicWrite(encoded, to: indexURL)
-        performanceMetrics.indexBytes = Int64(encoded.count)
     }
 
     private func mutateQueue(_ mutation: () -> Void) throws {
@@ -652,11 +649,6 @@ actor ClipStore {
             snapshot.queueIndex = previousIndex
             throw error
         }
-    }
-
-    private func atomicWrite(_ data: Data, to url: URL) throws {
-        try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     private static func applyLimits(

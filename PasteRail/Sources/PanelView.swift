@@ -112,11 +112,11 @@ struct PanelView: View {
             )
             .frame(minWidth: 90, alignment: .leading)
             if let current = queueRecord(at: model.queueIndex) {
-                Text("\(languageManager.text(.current)): \(current.isSensitive ? languageManager.text(.sensitiveContent) : current.title)")
+                Text("\(languageManager.text(.current)): \(current.title)")
                     .lineLimit(1)
             }
             if let next = queueRecord(at: model.queueIndex + 1) {
-                Text("\(languageManager.text(.next)): \(next.isSensitive ? languageManager.text(.sensitiveContent) : next.title)")
+                Text("\(languageManager.text(.next)): \(next.title)")
                     .lineLimit(1)
                     .foregroundStyle(.secondary)
             }
@@ -254,7 +254,6 @@ private struct ClipRow: View {
     }
 
     private var displayTitle: String {
-        if record.isSensitive { return languageManager.text(.sensitiveContent) }
         if record.kind == .file {
             return URL(fileURLWithPath: record.title).lastPathComponent
         }
@@ -262,9 +261,7 @@ private struct ClipRow: View {
     }
 
     private var accessibilityTitle: String {
-        record.isSensitive
-            ? "\(kindLabel(record.kind)), \(languageManager.text(.sensitiveContent))"
-            : "\(kindLabel(record.kind)), \(displayTitle)"
+        "\(kindLabel(record.kind)), \(displayTitle)"
     }
 
     private func kindLabel(_ kind: ClipKind) -> String {

@@ -102,9 +102,13 @@ struct ClipRecord: Identifiable, Codable, Equatable, Sendable {
     var sourceAppName: String?
     var sourceBundleIdentifier: String?
     var payloadFile: String
+    /// Encrypted full-size image written by earlier builds. New records keep images
+    /// only in the payload, but legacy files are still read, counted, and deleted.
     var imageFile: String?
     var thumbnailFile: String?
     var digest: String?
+    /// Kept so stored indexes stay decodable by earlier builds. Always false:
+    /// concealed, transient, and password-manager content is rejected at capture.
     var isSensitive: Bool
     var isPinned: Bool
 }

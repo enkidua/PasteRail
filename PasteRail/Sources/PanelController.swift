@@ -107,9 +107,6 @@ final class PanelController: NSWindowController, NSWindowDelegate {
         case 119:
             if textFieldIsEditing { return false }
             model.moveFocus(.last)
-        case 123, 124:
-            if textFieldIsEditing { return false }
-            return false
         case 36, 76:
             model.pasteFocused(
                 plainText: event.modifierFlags.contains(.shift),

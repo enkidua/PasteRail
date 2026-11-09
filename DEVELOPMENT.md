@@ -363,6 +363,15 @@ Current status on June 17, 2026:
   folder names are validated before anything is deleted. PRIVACY.md, README, and
   `Scripts/run-tests.sh` now state that Command Line Tools for the macOS 27 SDK
   cannot build the SwiftUI panel. Two ordinary tests were added, for 97 in total.
+- November 9 cleanup: diagnostics go to the unified log through `os.Logger` under
+  subsystem `io.pasterail.PasteRail`, so `log stream` shows them for Finder
+  launches too; `print` output was lost there. `ClipStore` now has one index writer
+  and one private file writer instead of two of each. The always-nil image file
+  variable in capture and the never-used sensitive-content display paths were
+  removed. The persisted `imageFile` and `isSensitive` fields stay, for legacy
+  records and for indexes read by older builds. A redundant arrow-key branch was
+  removed from the panel key handler. No behavior change is intended, and the test
+  count stays at 97.
 
 CI now prints Xcode, Swift, and macOS SDK versions, reports executed, failed, and
 skipped test counts, and fails when fewer than 97 ordinary tests execute. It builds

@@ -54,12 +54,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        print("PasteRail launched")
-        print("App path: \(Bundle.main.bundlePath)")
-        print("Bundle ID: \(Bundle.main.bundleIdentifier ?? "unknown")")
-        print("KeyStore type: \(PasteRailKeyStoreMode.current.rawValue)")
-        print("Selected language: \(languageManager.language.rawValue)")
-        print("Accessibility trusted: \(accessibilityManager.isTrusted())")
+        let log = PasteRailLog.app
+        log.notice("PasteRail launched")
+        log.info("App path: \(Bundle.main.bundlePath, privacy: .public)")
+        log.info("Bundle ID: \(Bundle.main.bundleIdentifier ?? "unknown", privacy: .public)")
+        log.info("KeyStore type: \(PasteRailKeyStoreMode.current.rawValue, privacy: .public)")
+        log.info("Selected language: \(self.languageManager.language.rawValue, privacy: .public)")
+        log.info("Accessibility trusted: \(self.accessibilityManager.isTrusted(), privacy: .public)")
         NSApp.setActivationPolicy(.accessory)
         configureStatusItem()
         startPasteRail()
@@ -69,9 +70,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startPasteRail() {
         do {
             model = AppModel(store: try ClipStore())
-            print("Store loaded success")
+            PasteRailLog.app.info("Store loaded")
         } catch {
-            print("Store loaded failure: \(error)")
+            PasteRailLog.app.error("Store failed to load: \(String(describing: error), privacy: .public)")
             showStorageError()
             return
         }
@@ -94,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         rebuildMenu()
-        print("Status item created")
+        PasteRailLog.app.debug("Status item created")
     }
 
     private func rebuildMenu() {
@@ -278,7 +279,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try ClipStore.resetApplicationData()
         } catch {
-            print("Reset failure: \(error)")
+            PasteRailLog.app.error("Reset failed: \(String(describing: error), privacy: .public)")
             let errorAlert = NSAlert()
             errorAlert.messageText = languageManager.text(.resetFailedTitle)
             errorAlert.informativeText = languageManager.text(.resetFailedMessage)
@@ -335,7 +336,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         openShortcutState = resolution.state
         PasteRailShortcut.current = resolution.state.shortcut
-        print("Open panel hotkey id: \(Self.openPanelHotKeyID), registration result: \(shortcut.label): \(result.localizedMessage(language: .english, shortcutLabel: shortcut.label))")
+        let message = result.localizedMessage(language: .english, shortcutLabel: shortcut.label)
+        PasteRailLog.hotKey.notice("Open panel hotkey id \(Self.openPanelHotKeyID, privacy: .public), \(shortcut.label, privacy: .public): \(message, privacy: .public)")
         return resolution.rejectedResult
     }
 
@@ -352,7 +354,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             queueShortcutStatus = registrationResult(from: error)
         }
         let label = PasteRailShortcut.queueLabel
-        print("Queue hotkey id: \(Self.queueHotKeyID), registration result: \(label): \(HotKeyRegistrationResult.localizedStatus(queueShortcutStatus, language: .english, shortcutLabel: label))")
+        let message = HotKeyRegistrationResult.localizedStatus(queueShortcutStatus, language: .english, shortcutLabel: label)
+        PasteRailLog.hotKey.notice("Queue hotkey id \(Self.queueHotKeyID, privacy: .public), \(label, privacy: .public): \(message, privacy: .public)")
     }
 
     private func registrationResult(from error: Error) -> HotKeyRegistrationResult {
