@@ -22,12 +22,13 @@ required for the current target beyond the PasteRail MIT license.
 
 - SwiftUI panel hosted in an AppKit `NSPanel`
 - AppKit pasteboard monitoring with item boundaries preserved
-- App-only local storage under `io.pasterail.PasteRail`
+- App-only local storage under `PasteRail`
 - Atomic JSON index, previous-index backup, corrupt-index preservation, separate
   payload/thumbnail files, legacy image-file compatibility, private POSIX permissions,
   and guarded orphan cleanup
 - AES-256-GCM encryption for the index, payloads, legacy original-image files, and thumbnails;
-  the 256-bit key is stored in the macOS Keychain
+  GitHub beta builds store the 256-bit key in `Keys/storage.key` under the app's
+  Application Support directory instead of using Keychain
 - No network libraries or remote services
 
 ## Paste success definition
@@ -117,11 +118,13 @@ it to `history.enc`. The original backup is not modified. This makes the recover
 store writable immediately and allows later captures and queue changes to survive
 another restart.
 
-The ordinary test target always injects a per-test `MemoryKeyStore`; reopening tests
-reuse that same instance. Real Keychain coverage is isolated in the opt-in
+The ordinary test target injects a per-test `MemoryKeyStore` for encrypted-store
+compatibility tests and uses `LocalFileEncryptionKeyStore` for default-key-store
+coverage. Real Keychain coverage is isolated in the opt-in
 `PasteRailKeychainIntegrationTests` target. Keychain creation handles a concurrent
 `errSecDuplicateItem` by reading and validating the existing 32-byte key without
-overwriting malformed data.
+overwriting malformed data. The default GitHub build path does not create
+`KeychainEncryptionKeyStore` unless `PASTERAIL_KEYSTORE=keychain` is explicitly set.
 
 ## Capture limits
 
@@ -205,10 +208,13 @@ notarizes and staples both the app and final DMG; and verifies them with codesig
 stapler, and Gatekeeper. If the certificate is unavailable, it creates only the
 ad-hoc test DMG and exits unsuccessfully rather than reporting a release.
 
-The production Keychain service `io.pasterail.PasteRail.storage` and account
-`primary-aes-gcm-key` remain unchanged. A same-team signed update should reuse the
-item, while the transition from an ad-hoc signature may trigger one-time macOS
-Keychain approval. This transition remains a required manual release test.
+The legacy optional Keychain service `io.pasterail.PasteRail.storage` and account
+`primary-aes-gcm-key` remain unchanged for opt-in compatibility and tests. GitHub
+beta builds use the local file key at `~/Library/Application Support/PasteRail/Keys/storage.key`
+by default, so first launch should not show a Keychain prompt. Existing encrypted
+history from older Keychain-backed test builds may fail to authenticate with the
+local key; PasteRail preserves the files and offers a user-confirmed data reset
+instead of deleting Keychain items or silently replacing encrypted data.
 
 ## Manual UI verification checklist
 
@@ -230,11 +236,15 @@ Current status on June 17, 2026:
 - Temporary ad-hoc codesign verification: passed locally. This is not a Developer
   ID signature and is not notarization; Gatekeeper can still warn or block the app
   on other Macs.
-- Ordinary tests implemented: 67.
+- Ordinary tests implemented: 88.
 - Keychain integration tests implemented: 1 opt-in test.
 - Local tests executed: 0. Neither XCTest nor Swift Testing is present in the
   selected Command Line Tools installation.
-- GitHub Actions ordinary test gate: requires at least 67 executed ordinary tests.
+- `Scripts/run-tests.sh` is the dedicated test entrypoint. It checks for XCTest
+  first and fails clearly when the local toolchain cannot import it. Packaging
+  scripts do not call this script by default, so a Command Line Tools-only machine
+  can still build the app and create a manual-test DMG.
+- GitHub Actions ordinary test gate: requires at least 88 executed ordinary tests.
 - Latest GitHub Actions CI for commit `70f4187` executed 59 ordinary tests with
   59 passed, 0 failed, and 0 skipped, then built and verified the Universal app.
 - Keychain integration testing remains opt-in and separate.
@@ -251,7 +261,7 @@ Current status on June 17, 2026:
   checksum passed `hdiutil verify` during `package-dmg.sh`.
 - The June 17 local `swift test --filter PasteRailTests` attempt compiled and
   linked the app target but executed 0 tests because XCTest is unavailable in the
-  selected Command Line Tools. The 67-test suite has not passed locally.
+  selected Command Line Tools. The ordinary XCTest suite has not passed locally.
 - GitHub CI run `27677174032` for commit `68e86e1` executed all 67 ordinary tests
   with 67 passed, 0 failed, and 0 skipped. Debug, Release, Universal build,
   architecture verification, strict ad-hoc codesign verification, Universal ZIP
@@ -265,9 +275,68 @@ Current status on June 17, 2026:
   marked successful. The release script correctly selected its certificate-missing
   fallback, rebuilt the Universal app, and created only the ad-hoc manual-test DMG;
   `hdiutil verify` passed and no `PasteRail-0.1.0-release.dmg` was produced.
+- June 26 local-key-store change: the default runtime key store was switched from
+  Keychain to `LocalFileEncryptionKeyStore`. The key is stored at
+  `~/Library/Application Support/PasteRail/Keys/storage.key` with `0600`
+  permissions, and `PASTERAIL_KEYSTORE=keychain` is now the only runtime path that
+  selects the legacy Keychain implementation. Five ordinary regression tests were
+  added for local-key creation/reuse, invalid key handling, wrong-key recovery,
+  and safe data reset. Clean first-launch Keychain-prompt behavior still requires
+  manual app execution verification.
+- June 26 local packaging path: `build-universal.sh`, `package-universal.sh`,
+  `package-review.sh`, and `package-dmg.sh` use build/sign/package verification
+  only; they do not require XCTest. The recommended local manual-test sequence is:
+
+  ```sh
+  rm -rf .build .swiftpm
+  swift build -c release
+  ./Scripts/build-universal.sh
+  ./Scripts/package-dmg.sh
+  ```
+- June 26 first-launch UX change: PasteRail remains an accessory menu bar app,
+  but first launch now shows a Welcome alert explaining menu bar status,
+  Command-Shift-V, Command-Option-P, local storage, and beta notarization status.
+  The status item sets a `PasteRail` tooltip and falls back to the `PR` title if
+  the SF Symbol cannot be created. Hot key registration now checks Carbon return
+  codes, logs success/failure, and warns the user when a shortcut cannot be
+  registered. Manual verification is still required for real menu bar visibility,
+  Welcome display, Accessibility settings opening, and shortcut behavior on a
+  user Mac.
+- June 26 language/accessibility/shortcut diagnostics change: the menu bar menu
+  now supports English and Korean through `selectedLanguage`, exposes a fixed set
+  of open-panel shortcut choices, rolls back shortcut changes that fail to
+  register, and can copy non-sensitive diagnostics. Accessibility permission uses
+  `AXIsProcessTrustedWithOptions` with the prompt option and opens the Privacy &
+  Security > Accessibility pane, but macOS still requires the user to grant access
+  manually. PasteRail cannot silently add itself to the Accessibility list. Running
+  directly from a DMG or using an ad-hoc, non-notarized build can make Gatekeeper
+  warnings and Accessibility-list appearance less predictable; `/Applications`
+  launch remains the manual-test recommendation. Command-Shift-V and other global
+  shortcuts can conflict with macOS or other apps, so menu-bar `Open PasteRail`
+  remains the fallback path.
+- November 9 shortcut, reset, and queue fixes: a failed menu shortcut change now
+  keeps the previous shortcut's registration status and shows a one-time alert
+  instead of leaving a permanent warning. Shortcut warnings are derived from the
+  current open-panel and queue registration state, so a successful open-panel
+  change no longer hides a queue shortcut failure, and warnings follow the selected
+  language. Selecting the current shortcut again retries registration when it is
+  not registered. `Reset PasteRail Data` closes the panel and restarts the store,
+  panel, and shortcuts even when deletion fails. Queue pastes run one at a time, so
+  two quick Command-Option-P presses paste two consecutive entries instead of the
+  first entry twice, and a payload load failure is no longer reported as a sent
+  paste. Eight ordinary tests were added, for 88 in total.
+- November 9 local verification: this machine has only Command Line Tools with the
+  macOS 27 SDK. There, `swift build` fails because SwiftUI `@State` and
+  `@FocusState` are macros that need Xcode's SwiftUIMacros plugin, and XCTest is
+  unavailable. In a scratch copy that stubbed those two property wrappers in
+  `PanelView.swift` and ran the unchanged XCTest file through a small
+  XCTest-to-Swift-Testing shim, the app module compiled and all 88 ordinary tests
+  passed. A control copy without queue serialization failed the new rapid-queue
+  test by pasting the first entry twice. CI remains the authority for the real
+  XCTest run.
 
 CI now prints Xcode, Swift, and macOS SDK versions, reports executed, failed, and
-skipped test counts, and fails when fewer than 67 ordinary tests execute. It builds
+skipped test counts, and fails when fewer than 88 ordinary tests execute. It builds
 and verifies the Universal app, prints `lipo` and codesign results, and uploads only
 `PasteRail-0.1.0-universal.zip` as the
 `PasteRail-0.1.0-universal` artifact. Keychain integration tests run only through
@@ -289,7 +358,7 @@ index or payload.
   and review packaging passed with the image-storage and packaging changes. Local
   `swift test` still executed 0 tests because the selected Command Line Tools does
   not provide `XCTest`; this is not recorded as a test pass. The prior GitHub run
-  covered 59 tests, so CI must run the new 67-test suite before release validation
+  covered 59 tests, so CI must run the current ordinary test suite before release validation
   is current.
 
 - Earlier on June 15, 2026, the installed Swift compiler and SDK builds did not
@@ -300,6 +369,9 @@ index or payload.
 - Local `swift test` then reached and linked the application target but failed at
   `import XCTest` for both test targets. Direct Swift Testing import also failed
   with `error: no such module 'Testing'`.
+- `Scripts/run-tests.sh` now preserves this distinction: it fails early with a
+  clear XCTest-unavailable message on Command Line Tools-only installations, while
+  app build and manual DMG packaging remain usable.
 - Source and application ZIP packaging succeeded. The source archive excludes
   build state and user files; the extracted application ZIP retained both
   architectures and passed strict codesign verification.

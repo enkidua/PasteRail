@@ -181,6 +181,7 @@ final class NativePasteboardAccess: PasteboardAccess {
 
 @MainActor
 final class PasteService {
+    static let accessibilityRequiredMessage = "accessibility-required"
     private let environment: PasteEnvironment
     private let ownBundleIdentifier: String?
 
@@ -203,7 +204,7 @@ final class PasteService {
             return .preparationFailed("This item has no writable representation.")
         }
         guard environment.accessibilityIsTrusted(prompt: true) else {
-            return .preparationFailed("Enable PasteRail in System Settings > Privacy & Security > Accessibility.")
+            return .preparationFailed(Self.accessibilityRequiredMessage)
         }
         guard let target = validTarget(target), environment.isRunning(target) else {
             return .preparationFailed("The previous application is no longer available.")

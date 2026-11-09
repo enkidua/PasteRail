@@ -24,8 +24,8 @@ final class PanelController: NSWindowController, NSWindowDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         super.init(window: panel)
         panel.delegate = self
-        panel.contentViewController = NSHostingController(rootView: PanelView(model: model) {
-            panel.orderOut(nil)
+        panel.contentViewController = NSHostingController(rootView: PanelView(model: model) { [weak panel] in
+            panel?.orderOut(nil)
         })
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handleKeyEvent(event) == true ? nil : event

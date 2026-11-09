@@ -15,6 +15,7 @@ actor ClipStore {
     static let maximumStoredRecords = 100
     static let maximumPayloadBytes = 20 * 1024 * 1024
     static let maximumStorageBytes: Int64 = 500 * 1024 * 1024
+    static let applicationSupportDirectoryName = "PasteRail"
 
     private struct BootstrapResult {
         var snapshot: Snapshot
@@ -83,7 +84,7 @@ actor ClipStore {
 
     init(
         rootURL: URL? = nil,
-        keyStore: EncryptionKeyStore = KeychainEncryptionKeyStore(),
+        keyStore: EncryptionKeyStore? = nil,
         storageLimitBytes: Int64 = ClipStore.maximumStorageBytes,
         persistenceFailureInjector: (@Sendable () throws -> Void)? = nil,
         fileOperationInjector: (@Sendable (ClipStoreFileOperation) throws -> Void)? = nil
@@ -97,7 +98,7 @@ actor ClipStore {
             guard let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
                 throw StoreError.invalidContainer
             }
-            root = support.appendingPathComponent("io.pasterail.PasteRail", isDirectory: true)
+            root = support.appendingPathComponent(Self.applicationSupportDirectoryName, isDirectory: true)
         }
         let localPayloadsURL = root.appendingPathComponent("Payloads", isDirectory: true)
         let localImagesURL = root.appendingPathComponent("Images", isDirectory: true)
@@ -107,7 +108,7 @@ actor ClipStore {
         let localRecoveryURL = root.appendingPathComponent("Recovery", isDirectory: true)
         let localCrypto: CryptoStore
         do {
-            localCrypto = try CryptoStore(keyStore: keyStore)
+            localCrypto = try CryptoStore(keyStore: keyStore ?? Self.defaultKeyStore(rootURL: root))
         } catch {
             throw StoreError.encryptionUnavailable
         }
@@ -150,6 +151,34 @@ actor ClipStore {
             indexBytes: bootstrap.indexBytes
         )
         try Self.applyPrivatePermissions(to: root)
+    }
+
+    static func defaultRootURL(fileManager: FileManager = .default) throws -> URL {
+        guard let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw StoreError.invalidContainer
+        }
+        return support.appendingPathComponent(applicationSupportDirectoryName, isDirectory: true)
+    }
+
+    static func defaultKeyStore(rootURL: URL) -> EncryptionKeyStore {
+        switch PasteRailKeyStoreMode.current {
+        case .keychain:
+            return KeychainEncryptionKeyStore()
+        case .local:
+            return LocalFileEncryptionKeyStore(rootURL: rootURL)
+        }
+    }
+
+    static func resetApplicationData(rootURL: URL? = nil) throws {
+        let target = try (rootURL ?? defaultRootURL()).standardizedFileURL
+        guard target.lastPathComponent == applicationSupportDirectoryName,
+              !target.path.isEmpty,
+              target.path != "/" else {
+            throw StoreError.invalidContainer
+        }
+        if FileManager.default.fileExists(atPath: target.path) {
+            try FileManager.default.removeItem(at: target)
+        }
     }
 
     private static func bootstrap(

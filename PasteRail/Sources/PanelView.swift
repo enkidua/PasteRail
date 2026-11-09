@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PanelView: View {
     @ObservedObject var model: AppModel
+    @ObservedObject private var languageManager = AppLanguageManager.shared
     let dismiss: () -> Void
     @FocusState private var searchFocused: Bool
 
@@ -24,7 +25,7 @@ struct PanelView: View {
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
-            Button("OK") { model.errorMessage = nil }
+            Button(languageManager.text(.ok)) { model.errorMessage = nil }
         } message: {
             Text(model.errorMessage ?? "")
         }
@@ -35,22 +36,22 @@ struct PanelView: View {
             HStack(spacing: 10) {
                 Image(systemName: "railway")
                     .font(.title2)
-                TextField("Search clipboard history", text: $model.searchText)
+                TextField(languageManager.text(.searchClipboardHistory), text: $model.searchText)
                     .textFieldStyle(.roundedBorder)
                     .focused($searchFocused)
-                Button("Queue Selected") { model.addSelectionToQueue() }
+                Button(languageManager.text(.queueSelected)) { model.addSelectionToQueue() }
                     .disabled(model.selection.isEmpty)
-                Button("Plain Text Queue") { model.addSelectionToQueue(plainText: true) }
+                Button(languageManager.text(.plainTextQueue)) { model.addSelectionToQueue(plainText: true) }
                     .disabled(model.selection.isEmpty)
             }
-            Picker("History type", selection: $model.filter) {
+            Picker(languageManager.text(.historyType), selection: $model.filter) {
                 ForEach(ClipFilter.allCases) { filter in
-                    Text(filter.label).tag(filter)
+                    Text(filterLabel(filter)).tag(filter)
                 }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            Text("최근 기록 최대 100개 저장")
+            Text(languageManager.text(.historyLimitNotice))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -67,9 +68,9 @@ struct PanelView: View {
                             Image(systemName: "clipboard")
                                 .font(.largeTitle)
                                 .foregroundStyle(.secondary)
-                            Text("No Clipboard History")
+                            Text(languageManager.text(.noClipboardHistory))
                                 .font(.headline)
-                            Text("Copy something or change the current search and filter.")
+                            Text(languageManager.text(.emptyHistoryHelp))
                                 .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, minHeight: 260)
@@ -105,30 +106,30 @@ struct PanelView: View {
         HStack(spacing: 8) {
             Label(
                 model.queue.isEmpty
-                    ? "Queue empty"
+                    ? languageManager.text(.queueEmpty)
                     : "\(min(model.queueIndex + 1, model.queue.count)) / \(model.queue.count)",
                 systemImage: "list.number"
             )
             .frame(minWidth: 90, alignment: .leading)
             if let current = queueRecord(at: model.queueIndex) {
-                Text("Current: \(current.isSensitive ? "Sensitive content" : current.title)")
+                Text("\(languageManager.text(.current)): \(current.isSensitive ? languageManager.text(.sensitiveContent) : current.title)")
                     .lineLimit(1)
             }
             if let next = queueRecord(at: model.queueIndex + 1) {
-                Text("Next: \(next.isSensitive ? "Sensitive content" : next.title)")
+                Text("\(languageManager.text(.next)): \(next.isSensitive ? languageManager.text(.sensitiveContent) : next.title)")
                     .lineLimit(1)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Previous") { model.previousQueueItem() }
+            Button(languageManager.text(.previous)) { model.previousQueueItem() }
                 .disabled(model.queueIndex == 0)
-            Button("Restart") { model.restartQueue() }
+            Button(languageManager.text(.restart)) { model.restartQueue() }
                 .disabled(model.queue.isEmpty)
-            Button("Skip") { model.skipQueueItem() }
+            Button(languageManager.text(.skip)) { model.skipQueueItem() }
                 .disabled(model.queueIndex >= model.queue.count)
-            Button("Paste Next") { model.pasteNextQueueItem(dismissPanel: dismiss) }
+            Button(languageManager.text(.pasteNext)) { model.pasteNextQueueItem(dismissPanel: dismiss) }
                 .disabled(model.queueIndex >= model.queue.count)
-            Button("Clear") { model.clearQueue() }
+            Button(languageManager.text(.clear)) { model.clearQueue() }
                 .disabled(model.queue.isEmpty)
         }
         .controlSize(.small)
@@ -146,9 +147,25 @@ struct PanelView: View {
             model.focusedRecordID = model.filteredRecords.first?.id
         }
     }
+
+    private func filterLabel(_ filter: ClipFilter) -> String {
+        switch (languageManager.language, filter) {
+        case (.english, .all): "All"
+        case (.korean, .all): "전체"
+        case (.english, .text): "Text"
+        case (.korean, .text): "텍스트"
+        case (.english, .image): "Images"
+        case (.korean, .image): "이미지"
+        case (.english, .link): "Links"
+        case (.korean, .link): "링크"
+        case (.english, .file): "Files"
+        case (.korean, .file): "파일"
+        }
+    }
 }
 
 private struct ClipRow: View {
+    @ObservedObject private var languageManager = AppLanguageManager.shared
     let model: AppModel
     let record: ClipRecord
     let isFocused: Bool
@@ -165,9 +182,9 @@ private struct ClipRow: View {
                     .font(.title3)
             }
             .buttonStyle(.plain)
-            .help("Select for queue")
-            .accessibilityLabel(isSelectedForQueue ? "Remove from queue selection" : "Select for queue")
-            .accessibilityHint("Changes queue selection without pasting this item.")
+            .help(languageManager.text(.selectForQueue))
+            .accessibilityLabel(isSelectedForQueue ? languageManager.text(.removeFromQueueSelection) : languageManager.text(.selectForQueue))
+            .accessibilityHint(languageManager.text(.selectForQueueHint))
 
             Button(action: paste) {
                 HStack(spacing: 10) {
@@ -186,12 +203,12 @@ private struct ClipRow: View {
                             }
                             if isQueued {
                                 Image(systemName: "text.line.first.and.arrowtriangle.forward")
-                                    .accessibilityLabel("In paste queue")
+                                    .accessibilityLabel(languageManager.text(.inPasteQueue))
                             }
                         }
                         HStack(spacing: 8) {
-                            Text(record.kind.label)
-                            Text(record.sourceAppName ?? "Unknown application")
+                            Text(kindLabel(record.kind))
+                            Text(record.sourceAppName ?? languageManager.text(.unknownApplication))
                             Text(record.createdAt, style: .relative)
                         }
                         .font(.caption)
@@ -203,7 +220,7 @@ private struct ClipRow: View {
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityLabel(accessibilityTitle)
-            .accessibilityHint("Pastes this item into the target application.")
+            .accessibilityHint(languageManager.text(.pasteItemHint))
 
             Button {
                 model.togglePinned(record)
@@ -211,9 +228,9 @@ private struct ClipRow: View {
                 Image(systemName: record.isPinned ? "pin.fill" : "pin")
             }
             .buttonStyle(.plain)
-            .help(record.isPinned ? "Unpin item" : "Pin item")
-            .accessibilityLabel(record.isPinned ? "Unpin item" : "Pin item")
-            .accessibilityHint("Changes pinned state without pasting this item.")
+            .help(record.isPinned ? languageManager.text(.unpinItem) : languageManager.text(.pinItem))
+            .accessibilityLabel(record.isPinned ? languageManager.text(.unpinItem) : languageManager.text(.pinItem))
+            .accessibilityHint(languageManager.text(.pinItemHint))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
@@ -237,7 +254,7 @@ private struct ClipRow: View {
     }
 
     private var displayTitle: String {
-        if record.isSensitive { return "Sensitive content" }
+        if record.isSensitive { return languageManager.text(.sensitiveContent) }
         if record.kind == .file {
             return URL(fileURLWithPath: record.title).lastPathComponent
         }
@@ -246,12 +263,28 @@ private struct ClipRow: View {
 
     private var accessibilityTitle: String {
         record.isSensitive
-            ? "\(record.kind.label), Sensitive content"
-            : "\(record.kind.label), \(displayTitle)"
+            ? "\(kindLabel(record.kind)), \(languageManager.text(.sensitiveContent))"
+            : "\(kindLabel(record.kind)), \(displayTitle)"
+    }
+
+    private func kindLabel(_ kind: ClipKind) -> String {
+        switch (languageManager.language, kind) {
+        case (.english, .text): "Text"
+        case (.korean, .text): "텍스트"
+        case (.english, .richText): "Rich Text"
+        case (.korean, .richText): "서식 있는 텍스트"
+        case (.english, .url): "URL"
+        case (.korean, .url): "URL"
+        case (.english, .image): "Image"
+        case (.korean, .image): "이미지"
+        case (.english, .file): "File"
+        case (.korean, .file): "파일"
+        }
     }
 }
 
 private struct ThumbnailView: View {
+    @ObservedObject private var languageManager = AppLanguageManager.shared
     let model: AppModel
     let record: ClipRecord
     @State private var image: NSImage?
@@ -267,7 +300,7 @@ private struct ThumbnailView: View {
             } else if failed {
                 Image(systemName: "exclamationmark.triangle")
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("Image preview unavailable")
+                    .accessibilityLabel(languageManager.text(.imagePreviewUnavailable))
             } else {
                 ProgressView()
                     .controlSize(.small)

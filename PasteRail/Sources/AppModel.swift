@@ -19,23 +19,27 @@ final class AppModel: ObservableObject {
     @Published private(set) var targetApplication: PasteTarget?
 
     let store: ClipStore
-    let pasteEnvironment: SystemPasteEnvironment
     let pasteService: PasteService
     private let defaults: UserDefaults
+    private var queuePasteTask: Task<Void, Never>?
     private var thumbnailCache: [UUID: NSImage] = [:]
     private var thumbnailCacheOrder: [UUID] = []
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private(set) var monitor: PasteboardMonitor!
 
-    init(store: ClipStore, defaults: UserDefaults = .standard) {
+    init(store: ClipStore, defaults: UserDefaults = .standard, pasteEnvironment: PasteEnvironment? = nil) {
         self.store = store
         self.defaults = defaults
         filter = ClipFilter(
             rawValue: defaults.string(forKey: Self.filterDefaultsKey) ?? ""
         ) ?? .all
-        pasteEnvironment = SystemPasteEnvironment()
-        pasteService = PasteService(environment: pasteEnvironment)
-        pasteEnvironment.didWritePasteboard = { [weak self] in self?.monitor.markInternalWrite() }
+        if let pasteEnvironment {
+            pasteService = PasteService(environment: pasteEnvironment)
+        } else {
+            let systemEnvironment = SystemPasteEnvironment()
+            pasteService = PasteService(environment: systemEnvironment)
+            systemEnvironment.didWritePasteboard = { [weak self] in self?.monitor.markInternalWrite() }
+        }
         memoryPressureSource = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         memoryPressureSource?.setEventHandler { [weak self] in
             Task { @MainActor in self?.clearThumbnailCache() }
@@ -89,6 +93,12 @@ final class AppModel: ObservableObject {
             errorMessage = await store.recoveryMessage
             monitor.start()
         }
+    }
+
+    func stop() {
+        monitor.stop()
+        memoryPressureSource?.cancel()
+        memoryPressureSource = nil
     }
 
     func rememberTargetApplication() {
@@ -200,28 +210,45 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func pasteNextQueueItem(target: PasteTarget? = nil, dismissPanel: @escaping () -> Void = {}) {
-        Task {
-            guard let entry = await store.currentQueueEntry(),
-                  let record = await store.record(id: entry.clipID) else { return }
-            do {
-                let payload = try await store.loadPayload(for: record)
-                let result = await pasteService.paste(
-                    payload,
-                    asPlainText: entry.plainText,
-                    target: target ?? targetApplication,
-                    dismissPanel: dismissPanel
-                )
-                if result == .eventSent {
-                    try await store.advanceQueue()
-                    await reload()
-                } else if let message = pasteErrorMessage(result) {
-                    errorMessage = message
-                }
-            } catch {
-                errorMessage = "Paste was sent, but queue progress could not be saved. The queue position was preserved."
-            }
+    /// Queue pastes run one at a time, so pressing the shortcut twice quickly pastes
+    /// two consecutive entries instead of the same entry twice.
+    @discardableResult
+    func pasteNextQueueItem(target: PasteTarget? = nil, dismissPanel: @escaping () -> Void = {}) -> Task<Void, Never> {
+        let previous = queuePasteTask
+        let task = Task {
+            await previous?.value
+            await performQueuePaste(target: target, dismissPanel: dismissPanel)
         }
+        queuePasteTask = task
+        return task
+    }
+
+    private func performQueuePaste(target: PasteTarget?, dismissPanel: @escaping () -> Void) async {
+        guard let entry = await store.currentQueueEntry(),
+              let record = await store.record(id: entry.clipID) else { return }
+        let payload: ClipPayload
+        do {
+            payload = try await store.loadPayload(for: record)
+        } catch {
+            errorMessage = "PasteRail could not load this queue item. The queue position was preserved."
+            return
+        }
+        let result = await pasteService.paste(
+            payload,
+            asPlainText: entry.plainText,
+            target: target ?? targetApplication,
+            dismissPanel: dismissPanel
+        )
+        guard result == .eventSent else {
+            if let message = pasteErrorMessage(result) { errorMessage = message }
+            return
+        }
+        do {
+            try await store.advanceQueue()
+        } catch {
+            errorMessage = "Paste was sent, but queue progress could not be saved. The queue position was preserved."
+        }
+        await reload()
     }
 
     private func pasteErrorMessage(_ result: PasteResult) -> String? {
@@ -237,7 +264,11 @@ final class AppModel: ObservableObject {
         case .newWriteFailedPreviousLost:
             "PasteRail could not write this item or restore the previous clipboard contents."
         case let .preparationFailed(message):
-            message
+            if message == PasteService.accessibilityRequiredMessage {
+                AppLanguageManager.shared.text(.accessibilityPasteRequired)
+            } else {
+                message
+            }
         }
     }
 

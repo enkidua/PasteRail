@@ -34,6 +34,67 @@ final class PasteRailTests: XCTestCase {
         XCTAssertEqual(loaded, payload)
     }
 
+    func testDefaultClipStoreUsesLocalFileKeyStore() async throws {
+        let localRoot = root.appendingPathComponent("PasteRail", isDirectory: true)
+        let store = try ClipStore(rootURL: localRoot)
+        _ = try await store.capture(payload: textPayload("local default"), kind: .text, title: "local default", searchText: "local default", sourceAppName: nil, sourceBundleIdentifier: nil)
+
+        let keyURL = localRoot.appendingPathComponent("Keys/storage.key")
+        let key = try Data(contentsOf: keyURL)
+        XCTAssertEqual(key.count, 32)
+        let permissions = try FileManager.default.attributesOfItem(atPath: keyURL.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(permissions?.intValue, 0o600)
+    }
+
+    func testLocalFileKeyStoreCreatesAndReusesThirtyTwoByteKey() throws {
+        let keyRoot = root.appendingPathComponent("PasteRail", isDirectory: true)
+        let store = LocalFileEncryptionKeyStore(rootURL: keyRoot)
+        let first = try store.loadOrCreateKey()
+        let second = try store.loadOrCreateKey()
+
+        XCTAssertEqual(first.count, 32)
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(try Data(contentsOf: keyRoot.appendingPathComponent("Keys/storage.key")), first)
+    }
+
+    func testLocalFileKeyStoreRejectsInvalidKeyLengthWithoutOverwriting() throws {
+        let keyRoot = root.appendingPathComponent("PasteRail", isDirectory: true)
+        let keyURL = keyRoot.appendingPathComponent("Keys/storage.key")
+        try FileManager.default.createDirectory(at: keyURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let invalid = Data(repeating: 0x7A, count: 31)
+        try invalid.write(to: keyURL)
+
+        XCTAssertThrowsError(try LocalFileEncryptionKeyStore(rootURL: keyRoot).loadOrCreateKey())
+        XCTAssertEqual(try Data(contentsOf: keyURL), invalid)
+    }
+
+    func testWrongLocalKeyReturnsRecoverableStoreErrorWithoutDeletingData() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        let record = try await store.capture(payload: textPayload("wrong-key"), kind: .text, title: "wrong-key", searchText: "wrong-key", sourceAppName: nil, sourceBundleIdentifier: nil)
+        let index = root.appendingPathComponent("history.enc")
+        let payload = root.appendingPathComponent("Payloads/\(record.payloadFile)")
+        let indexData = try Data(contentsOf: index)
+        let payloadData = try Data(contentsOf: payload)
+
+        XCTAssertThrowsError(try ClipStore(rootURL: root, keyStore: MemoryKeyStore(byte: 0x22)))
+        XCTAssertEqual(try Data(contentsOf: index), indexData)
+        XCTAssertEqual(try Data(contentsOf: payload), payloadData)
+    }
+
+    func testResetApplicationDataDeletesOnlyPasteRailDirectory() throws {
+        let target = root.appendingPathComponent("PasteRail", isDirectory: true)
+        let outside = root.appendingPathComponent("outside.txt")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try Data("history".utf8).write(to: target.appendingPathComponent("file.txt"))
+        try Data("outside".utf8).write(to: outside)
+
+        try ClipStore.resetApplicationData(rootURL: target)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outside.path))
+        XCTAssertThrowsError(try ClipStore.resetApplicationData(rootURL: root.appendingPathComponent("NotPasteRail", isDirectory: true)))
+    }
+
     func testUpdateReopensExistingEncryptedHistoryWithSameKeyWithoutReplacingData() async throws {
         let stableKeyStore = MemoryKeyStore()
         let previousBuildStore = try ClipStore(rootURL: root, keyStore: stableKeyStore)
@@ -217,6 +278,148 @@ final class PasteRailTests: XCTestCase {
         }
         let finalEntry = await store.currentQueueEntry()
         XCTAssertNil(finalEntry)
+    }
+
+    func testHotKeyRoutingIgnoresDifferentEventID() {
+        XCTAssertTrue(HotKey.shouldHandleEvent(expectedID: 1, actualID: 1))
+        XCTAssertFalse(HotKey.shouldHandleEvent(expectedID: 1, actualID: 2))
+        XCTAssertTrue(HotKey.shouldHandleEvent(expectedID: 2, actualID: 2))
+        XCTAssertFalse(HotKey.shouldHandleEvent(expectedID: 2, actualID: 1))
+    }
+
+    func testOpenPanelAndQueueHotKeyIDsRouteToSeparateActions() {
+        let events: [(id: UInt32, expected: String?)] = [
+            (1, "open"),
+            (2, "queue"),
+            (99, nil)
+        ]
+        let routed = events.map { event -> String? in
+            if HotKey.shouldHandleEvent(expectedID: 1, actualID: event.id) { return "open" }
+            if HotKey.shouldHandleEvent(expectedID: 2, actualID: event.id) { return "queue" }
+            return nil
+        }
+        XCTAssertEqual(routed, events.map(\.expected))
+    }
+
+    func testSelectingCurrentShortcutDoesNotRegisterAgain() {
+        XCTAssertFalse(ShortcutSelectionDecision.shouldRegister(current: .commandShiftV, requested: .commandShiftV))
+        XCTAssertTrue(ShortcutSelectionDecision.shouldRegister(current: .commandShiftV, requested: .commandOptionV))
+    }
+
+    func testSelectingCurrentShortcutRetriesAfterFailedRegistration() {
+        XCTAssertTrue(ShortcutSelectionDecision.shouldRegister(current: .commandShiftV, requested: .commandShiftV, currentStatus: .conflict))
+        XCTAssertTrue(ShortcutSelectionDecision.shouldRegister(current: .commandShiftV, requested: .commandShiftV, currentStatus: nil))
+        XCTAssertFalse(ShortcutSelectionDecision.shouldRegister(current: .commandShiftV, requested: .commandShiftV, currentStatus: .success))
+    }
+
+    func testConflictMessageIncludesActualShortcutLabel() {
+        let message = HotKeyRegistrationResult.conflict.localizedMessage(
+            language: .english,
+            shortcutLabel: PasteRailShortcut.commandOptionV.label
+        )
+        XCTAssertTrue(message.contains("Command + Option + V"))
+        XCTAssertFalse(message.contains("Command + Shift + V"))
+
+        let korean = HotKeyRegistrationResult.conflict.localizedMessage(
+            language: .korean,
+            shortcutLabel: PasteRailShortcut.controlOptionSpace.label
+        )
+        XCTAssertTrue(korean.contains("Control + Option + Space"))
+    }
+
+    func testQueueShortcutConflictMessageDoesNotMentionCommandShiftV() {
+        let message = HotKeyRegistrationResult.conflict.localizedMessage(
+            language: .english,
+            shortcutLabel: "Command + Option + P"
+        )
+        XCTAssertTrue(message.contains("Command + Option + P"))
+        XCTAssertFalse(message.contains("Command + Shift + V"))
+    }
+
+    func testSuccessfulShortcutRegistrationActivatesRequestedShortcut() {
+        let previous = OpenShortcutState(shortcut: .commandShiftV, status: .conflict)
+        let resolution = OpenShortcutRegistrationPolicy.resolve(
+            previous: previous,
+            requested: .controlOptionSpace,
+            result: .success,
+            allowRollback: true
+        )
+        XCTAssertEqual(resolution.state, OpenShortcutState(shortcut: .controlOptionSpace, status: .success))
+        XCTAssertNil(resolution.rejectedResult)
+        XCTAssertEqual(HotKeyWarnings.messages(open: resolution.state, queueStatus: .success, language: .english), [])
+    }
+
+    func testFailedShortcutSelectionRestoresPreviousStatusWithoutLingeringWarning() {
+        let previous = OpenShortcutState(shortcut: .commandShiftV, status: .success)
+        let resolution = OpenShortcutRegistrationPolicy.resolve(
+            previous: previous,
+            requested: .commandOptionV,
+            result: .conflict,
+            allowRollback: true
+        )
+        XCTAssertEqual(resolution.state, previous)
+        XCTAssertEqual(resolution.rejectedResult, .conflict)
+        XCTAssertEqual(HotKeyWarnings.messages(open: resolution.state, queueStatus: .success, language: .english), [])
+    }
+
+    func testLaunchShortcutFailureKeepsPersistedChoiceAndWarns() {
+        let previous = OpenShortcutState(shortcut: .commandShiftV, status: nil)
+        let resolution = OpenShortcutRegistrationPolicy.resolve(
+            previous: previous,
+            requested: .commandShiftV,
+            result: .failed(-50),
+            allowRollback: false
+        )
+        XCTAssertEqual(resolution.state, OpenShortcutState(shortcut: .commandShiftV, status: .failed(-50)))
+        XCTAssertNil(resolution.rejectedResult)
+        let warnings = HotKeyWarnings.messages(open: resolution.state, queueStatus: .success, language: .english)
+        XCTAssertEqual(warnings.count, 1)
+        XCTAssertTrue(warnings[0].contains("Command + Shift + V"))
+    }
+
+    func testOpenShortcutSuccessKeepsQueueShortcutWarning() {
+        let open = OpenShortcutState(shortcut: .commandOptionV, status: .success)
+        let english = HotKeyWarnings.messages(open: open, queueStatus: .failed(-50), language: .english)
+        XCTAssertEqual(english.count, 1)
+        XCTAssertTrue(english[0].contains(PasteRailShortcut.queueLabel))
+        XCTAssertTrue(english[0].contains("global shortcut"))
+
+        let korean = HotKeyWarnings.messages(open: open, queueStatus: .failed(-50), language: .korean)
+        XCTAssertEqual(korean.count, 1)
+        XCTAssertTrue(korean[0].contains("전역 단축키"))
+    }
+
+    func testUnattemptedShortcutRegistrationsProduceNoWarnings() {
+        let open = OpenShortcutState(shortcut: .commandShiftV, status: nil)
+        XCTAssertEqual(HotKeyWarnings.messages(open: open, queueStatus: nil, language: .english), [])
+        XCTAssertEqual(HotKeyRegistrationResult.localizedStatus(nil, language: .english, shortcutLabel: open.shortcut.label), "Not registered")
+        XCTAssertEqual(HotKeyRegistrationResult.localizedStatus(nil, language: .korean, shortcutLabel: open.shortcut.label), "등록되지 않음")
+    }
+
+    func testAppLanguageManagerIncludesPanelStringsInBothLanguages() throws {
+        let defaults = try isolatedDefaults()
+        let manager = AppLanguageManager(defaults: defaults)
+        let keys: [AppLanguageManager.TextKey] = [
+            .searchClipboardHistory, .queueSelected, .plainTextQueue, .historyType,
+            .historyLimitNotice, .noClipboardHistory, .emptyHistoryHelp, .queueEmpty,
+            .current, .next, .previous, .restart, .skip, .pasteNext, .clear,
+            .unknownApplication, .sensitiveContent
+        ]
+        for language in AppLanguage.allCases {
+            manager.language = language
+            for key in keys {
+                XCTAssertFalse(manager.text(key).isEmpty, "\(key) missing for \(language.rawValue)")
+            }
+        }
+    }
+
+    func testSelectedLanguagePersistsAndReloads() throws {
+        let defaults = try isolatedDefaults()
+        let manager = AppLanguageManager(defaults: defaults)
+        manager.language = .korean
+        XCTAssertEqual(AppLanguageManager(defaults: defaults).language, .korean)
+        manager.language = .english
+        XCTAssertEqual(AppLanguageManager(defaults: defaults).language, .english)
     }
 
     func testCorruptIndexRestoresBackupAndPreservesCorruptFile() async throws {
@@ -663,6 +866,62 @@ final class PasteRailTests: XCTestCase {
         if result == .eventSent { try await store.advanceQueue() }
         let queueIndex = await store.queueState().1
         XCTAssertEqual(queueIndex, 0)
+    }
+
+    @MainActor
+    func testQueuePasteLoadFailureKeepsPositionWithoutClaimingPasteWasSent() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        let record = try await store.capture(payload: textPayload("missing"), kind: .text, title: "missing", searchText: "missing", sourceAppName: nil, sourceBundleIdentifier: "com.apple.TextEdit")
+        try await store.enqueue([record.id])
+        try FileManager.default.removeItem(at: root.appendingPathComponent("Payloads/\(record.payloadFile)"))
+        let environment = FakePasteEnvironment()
+        let model = AppModel(store: store, defaults: try isolatedDefaults(), pasteEnvironment: environment)
+
+        await model.pasteNextQueueItem(target: environment.frontmostTarget).value
+
+        let message = try XCTUnwrap(model.errorMessage)
+        XCTAssertTrue(message.contains("could not load"))
+        XCTAssertFalse(message.contains("Paste was sent"))
+        XCTAssertEqual(environment.writeCount, 0)
+        let queueIndex = await store.queueState().1
+        XCTAssertEqual(queueIndex, 0)
+    }
+
+    @MainActor
+    func testQueuePasteAdvanceFailureReportsSentPasteAndKeepsPosition() async throws {
+        let failure = PersistenceFailure()
+        let store = try ClipStore(rootURL: root, keyStore: keyStore, persistenceFailureInjector: { try failure.check() })
+        let record = try await store.capture(payload: textPayload("queued"), kind: .text, title: "queued", searchText: "queued", sourceAppName: nil, sourceBundleIdentifier: "com.apple.TextEdit")
+        try await store.enqueue([record.id])
+        failure.enabled = true
+        let environment = FakePasteEnvironment()
+        let model = AppModel(store: store, defaults: try isolatedDefaults(), pasteEnvironment: environment)
+
+        await model.pasteNextQueueItem(target: environment.frontmostTarget).value
+
+        let message = try XCTUnwrap(model.errorMessage)
+        XCTAssertTrue(message.contains("Paste was sent"))
+        XCTAssertEqual(environment.writtenTexts, ["queued"])
+        let queueIndex = await store.queueState().1
+        XCTAssertEqual(queueIndex, 0)
+    }
+
+    @MainActor
+    func testRapidQueuePastesPasteEachEntryOnceInOrder() async throws {
+        let store = try ClipStore(rootURL: root, keyStore: keyStore)
+        let first = try await store.capture(payload: textPayload("first"), kind: .text, title: "first", searchText: "first", sourceAppName: nil, sourceBundleIdentifier: "com.apple.TextEdit")
+        let second = try await store.capture(payload: textPayload("second"), kind: .text, title: "second", searchText: "second", sourceAppName: nil, sourceBundleIdentifier: "com.apple.TextEdit")
+        try await store.enqueue([first.id, second.id])
+        let environment = FakePasteEnvironment()
+        let model = AppModel(store: store, defaults: try isolatedDefaults(), pasteEnvironment: environment)
+
+        model.pasteNextQueueItem(target: environment.frontmostTarget)
+        await model.pasteNextQueueItem(target: environment.frontmostTarget).value
+
+        XCTAssertEqual(environment.writtenTexts, ["first", "second"])
+        XCTAssertNil(model.errorMessage)
+        let queueIndex = await store.queueState().1
+        XCTAssertEqual(queueIndex, 2)
     }
 
     @MainActor
@@ -1354,6 +1613,7 @@ private final class FakePasteEnvironment: PasteEnvironment {
     var sendSucceeds = true
     var restoreSucceeds = true
     var writeCount = 0
+    var writtenTexts: [String?] = []
     var actions: [String] = []
 
     func isRunning(_ target: PasteTarget) -> Bool { running }
@@ -1363,6 +1623,7 @@ private final class FakePasteEnvironment: PasteEnvironment {
     func write(_ payload: ClipPayload, plainText: Bool) -> PasteboardWriteResult {
         actions.append("write")
         writeCount += 1
+        writtenTexts.append(payload.plainText)
         return writeSucceeds ? .success : .newWriteFailedPreviousRestored
     }
     func sendPasteShortcut() -> Bool { actions.append("send"); return sendSucceeds }
