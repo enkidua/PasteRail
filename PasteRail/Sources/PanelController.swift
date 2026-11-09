@@ -50,7 +50,7 @@ final class PanelController: NSWindowController, NSWindowDelegate {
         }
         model.rememberTargetApplication()
         restorePosition(window)
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.activatePasteRail()
         window.makeKeyAndOrderFront(nil)
     }
 

@@ -11,6 +11,15 @@ enum ClipStoreFileOperation: Equatable, Sendable {
     case beforeHistoryLimitPersist
 }
 
+/// Conditions found while opening the store. They are reported as values so the
+/// app can show them in the selected language.
+enum StoreRecoveryNotice: Equatable, Sendable {
+    case indexRestoredFromBackup
+    case pinnedRecordsExceedStorageLimit
+    case pinnedRecordsExceedHistoryLimit
+    case plaintextCleanupPending
+}
+
 actor ClipStore {
     static let maximumStoredRecords = 100
     static let maximumPayloadBytes = 20 * 1024 * 1024
@@ -19,7 +28,7 @@ actor ClipStore {
 
     private struct BootstrapResult {
         var snapshot: Snapshot
-        let recoveryMessage: String?
+        let recoveryNotices: [StoreRecoveryNotice]
         let indexBytes: Int64
     }
 
@@ -80,7 +89,7 @@ actor ClipStore {
     private var digestLookup: [String: UUID] = [:]
     private(set) var performanceMetrics: PerformanceMetrics
 
-    private(set) var recoveryMessage: String?
+    private(set) var recoveryNotices: [StoreRecoveryNotice]
 
     init(
         rootURL: URL? = nil,
@@ -141,7 +150,7 @@ actor ClipStore {
         self.persistenceFailureInjector = persistenceFailureInjector
         self.fileOperationInjector = fileOperationInjector
         snapshot = bootstrap.snapshot
-        recoveryMessage = bootstrap.recoveryMessage
+        recoveryNotices = bootstrap.recoveryNotices
         digestLookup = Dictionary(
             bootstrap.snapshot.records.compactMap { record in record.digest.map { ($0, record.id) } },
             uniquingKeysWith: { first, _ in first }
@@ -196,7 +205,7 @@ actor ClipStore {
     ) throws -> BootstrapResult {
         let fileManager = FileManager.default
         var snapshot: Snapshot
-        var recoveryMessage: String?
+        var recoveryNotices: [StoreRecoveryNotice] = []
 
         if fileManager.fileExists(atPath: indexURL.path) {
             do {
@@ -216,7 +225,7 @@ actor ClipStore {
                     fileOperationInjector: fileOperationInjector
                 )
                 snapshot = recovered
-                recoveryMessage = "Clipboard history index was damaged. PasteRail preserved the encrypted file and restored the last backup."
+                recoveryNotices.append(.indexRestoredFromBackup)
             }
         } else {
             snapshot = try migratePlaintextStoreIfPresent(
@@ -274,13 +283,9 @@ actor ClipStore {
                 snapshot = limited
             }
         } catch StoreError.storageLimitReached {
-            recoveryMessage = [recoveryMessage, "Stored pinned clipboard records exceed the storage limit. PasteRail preserved them and will reject new records until space is available."]
-                .compactMap { $0 }
-                .joined(separator: "\n")
+            recoveryNotices.append(.pinnedRecordsExceedStorageLimit)
         } catch StoreError.historyLimitReached {
-            recoveryMessage = [recoveryMessage, "More than 100 stored records are pinned. PasteRail preserved them and will reject new records until records are unpinned or removed."]
-                .compactMap { $0 }
-                .joined(separator: "\n")
+            recoveryNotices.append(.pinnedRecordsExceedHistoryLimit)
         }
 
         do {
@@ -295,9 +300,7 @@ actor ClipStore {
                 fileOperationInjector: fileOperationInjector
             )
         } catch {
-            recoveryMessage = [recoveryMessage, "Encrypted history is available, but secure plaintext cleanup could not be completed. It will be retried."]
-                .compactMap { $0 }
-                .joined(separator: "\n")
+            recoveryNotices.append(.plaintextCleanupPending)
         }
         try? writeRecoveryCandidateList(
             snapshot: snapshot,
@@ -309,7 +312,7 @@ actor ClipStore {
 
         return BootstrapResult(
             snapshot: snapshot,
-            recoveryMessage: recoveryMessage,
+            recoveryNotices: recoveryNotices,
             indexBytes: Int64((try? indexURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
         )
     }

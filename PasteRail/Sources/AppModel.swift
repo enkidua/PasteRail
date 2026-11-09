@@ -21,15 +21,22 @@ final class AppModel: ObservableObject {
     let store: ClipStore
     let pasteService: PasteService
     private let defaults: UserDefaults
+    private let languageManager: AppLanguageManager
     private var queuePasteTask: Task<Void, Never>?
     private var thumbnailCache: [UUID: NSImage] = [:]
     private var thumbnailCacheOrder: [UUID] = []
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private(set) var monitor: PasteboardMonitor!
 
-    init(store: ClipStore, defaults: UserDefaults = .standard, pasteEnvironment: PasteEnvironment? = nil) {
+    init(
+        store: ClipStore,
+        defaults: UserDefaults = .standard,
+        pasteEnvironment: PasteEnvironment? = nil,
+        languageManager: AppLanguageManager = .shared
+    ) {
         self.store = store
         self.defaults = defaults
+        self.languageManager = languageManager
         filter = ClipFilter(
             rawValue: defaults.string(forKey: Self.filterDefaultsKey) ?? ""
         ) ?? .all
@@ -58,14 +65,12 @@ final class AppModel: ObservableObject {
                         sourceBundleIdentifier: app.bundleIdentifier
                     )
                     await self.reload()
+                } catch ClipStore.StoreError.historyLimitReached {
+                    self.showError(.captureHistoryLimit)
+                } catch ClipStore.StoreError.storageLimitReached {
+                    self.showError(.captureStorageLimit)
                 } catch {
-                    if case ClipStore.StoreError.historyLimitReached = error {
-                        self.errorMessage = "PasteRail stores up to 100 recent items. All current items are pinned, so the new item was not saved."
-                    } else if case ClipStore.StoreError.storageLimitReached = error {
-                        self.errorMessage = "PasteRail uses up to 500 MiB for clipboard files. Pinned items prevent enough space from being freed, so the new item was not saved."
-                    } else {
-                        self.errorMessage = "PasteRail could not safely store this clipboard item."
-                    }
+                    self.showError(.captureFailed)
                 }
             }
         }
@@ -90,7 +95,10 @@ final class AppModel: ObservableObject {
     func start() {
         Task {
             await reload()
-            errorMessage = await store.recoveryMessage
+            let notices = await store.recoveryNotices
+            if !notices.isEmpty {
+                errorMessage = notices.map { languageManager.message(for: $0) }.joined(separator: "\n")
+            }
             monitor.start()
         }
     }
@@ -164,7 +172,7 @@ final class AppModel: ObservableObject {
                 try await store.setPinned(record.id, pinned: !record.isPinned)
                 await reload()
             } catch {
-                errorMessage = "PasteRail could not save the pin change."
+                showError(.pinChangeFailed)
                 await reload()
             }
         }
@@ -191,9 +199,9 @@ final class AppModel: ObservableObject {
                     target: targetApplication,
                     dismissPanel: dismissPanel
                 )
-                if let message = pasteErrorMessage(result) { errorMessage = message }
+                showPasteResult(result)
             } catch {
-                errorMessage = "PasteRail could not load this clipboard item."
+                showError(.clipboardItemLoadFailed)
             }
         }
     }
@@ -205,7 +213,7 @@ final class AppModel: ObservableObject {
                 try await store.enqueue(ordered, plainText: plainText)
                 await reload()
             } catch {
-                errorMessage = "The paste queue could not be saved."
+                showError(.queueSaveFailed)
             }
         }
     }
@@ -230,7 +238,7 @@ final class AppModel: ObservableObject {
         do {
             payload = try await store.loadPayload(for: record)
         } catch {
-            errorMessage = "PasteRail could not load this queue item. The queue position was preserved."
+            showError(.queueItemLoadFailed)
             return
         }
         let result = await pasteService.paste(
@@ -240,36 +248,23 @@ final class AppModel: ObservableObject {
             dismissPanel: dismissPanel
         )
         guard result == .eventSent else {
-            if let message = pasteErrorMessage(result) { errorMessage = message }
+            showPasteResult(result)
             return
         }
         do {
             try await store.advanceQueue()
         } catch {
-            errorMessage = "Paste was sent, but queue progress could not be saved. The queue position was preserved."
+            showError(.queueAdvanceFailed)
         }
         await reload()
     }
 
-    private func pasteErrorMessage(_ result: PasteResult) -> String? {
-        switch result {
-        case .eventSent:
-            nil
-        case .eventFailedPreviousRestored:
-            "Paste shortcut delivery failed. The previous clipboard contents were restored."
-        case .eventFailedPreviousLost:
-            "Paste shortcut delivery failed, and PasteRail could not restore the previous clipboard contents."
-        case .newWriteFailedPreviousRestored:
-            "PasteRail could not write this item. The previous clipboard contents were restored."
-        case .newWriteFailedPreviousLost:
-            "PasteRail could not write this item or restore the previous clipboard contents."
-        case let .preparationFailed(message):
-            if message == PasteService.accessibilityRequiredMessage {
-                AppLanguageManager.shared.text(.accessibilityPasteRequired)
-            } else {
-                message
-            }
-        }
+    private func showError(_ key: AppLanguageManager.TextKey) {
+        errorMessage = languageManager.text(key)
+    }
+
+    private func showPasteResult(_ result: PasteResult) {
+        if let message = languageManager.message(for: result) { errorMessage = message }
     }
 
     func previousQueueItem() {
@@ -294,7 +289,7 @@ final class AppModel: ObservableObject {
                 try await operation()
                 await reload()
             } catch {
-                errorMessage = "The paste queue change could not be saved. The previous queue was kept."
+                showError(.queueChangeFailed)
                 await reload()
             }
         }

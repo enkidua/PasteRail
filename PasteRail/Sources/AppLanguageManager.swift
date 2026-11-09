@@ -65,10 +65,8 @@ final class AppLanguageManager: ObservableObject {
         case (.korean, .quit): "PasteRail 종료"
         case (.english, .welcomeTitle): "PasteRail is running in the menu bar."
         case (.korean, .welcomeTitle): "PasteRail이 메뉴바에서 실행 중입니다."
-        case (.english, .welcomeOpenShortcut): "Press Command-Shift-V to open clipboard history."
-        case (.korean, .welcomeOpenShortcut): "Command-Shift-V를 눌러 클립보드 기록을 여세요."
-        case (.english, .welcomeQueueShortcut): "Press Command-Option-P to paste the next queue item."
-        case (.korean, .welcomeQueueShortcut): "Command-Option-P를 눌러 큐의 다음 항목을 붙여넣으세요."
+        case (.english, .welcomeQueueShortcut): "Press Command + Option + P to paste the next queue item."
+        case (.korean, .welcomeQueueShortcut): "Command + Option + P를 눌러 큐의 다음 항목을 붙여넣으세요."
         case (.english, .welcomeLocalStorage): "Clipboard history is stored locally."
         case (.korean, .welcomeLocalStorage): "클립보드 기록은 이 Mac에만 저장됩니다."
         case (.english, .welcomeNotNotarized): "This beta build is not notarized."
@@ -85,12 +83,12 @@ final class AppLanguageManager: ObservableObject {
         case (.korean, .reset): "초기화"
         case (.english, .resetTitle): "Reset PasteRail data?"
         case (.korean, .resetTitle): "PasteRail 데이터를 초기화할까요?"
-        case (.english, .resetMessage): "This deletes PasteRail clipboard history and local encryption keys from ~/Library/Application Support/PasteRail. It does not delete any Keychain items from older test builds."
-        case (.korean, .resetMessage): "~/Library/Application Support/PasteRail의 클립보드 기록과 로컬 암호화 키를 삭제합니다. 이전 테스트 빌드의 Keychain 항목은 삭제하지 않습니다."
+        case (.english, .resetMessage): "This deletes PasteRail clipboard history and local encryption keys from ~/Library/Application Support/PasteRail, and data left by the first test build in ~/Library/Application Support/io.pasterail.PasteRail. It does not delete any Keychain items from older test builds."
+        case (.korean, .resetMessage): "~/Library/Application Support/PasteRail의 클립보드 기록과 로컬 암호화 키, 그리고 첫 테스트 빌드가 남긴 ~/Library/Application Support/io.pasterail.PasteRail 데이터를 삭제합니다. 이전 테스트 빌드의 Keychain 항목은 삭제하지 않습니다."
         case (.english, .resetFailedTitle): "PasteRail could not reset its local data."
         case (.korean, .resetFailedTitle): "PasteRail 로컬 데이터를 초기화하지 못했습니다."
-        case (.english, .resetFailedMessage): "Check permissions for ~/Library/Application Support/PasteRail and try again."
-        case (.korean, .resetFailedMessage): "~/Library/Application Support/PasteRail 권한을 확인한 뒤 다시 시도하세요."
+        case (.english, .resetFailedMessage): "Check permissions for the PasteRail folders in ~/Library/Application Support and try again."
+        case (.korean, .resetFailedMessage): "~/Library/Application Support 안의 PasteRail 폴더 권한을 확인한 뒤 다시 시도하세요."
         case (.english, .storageErrorTitle): "PasteRail could not open its local history."
         case (.korean, .storageErrorTitle): "PasteRail 로컬 기록을 열 수 없습니다."
         case (.english, .storageErrorMessage): "Records from an earlier test build may use a different encryption key. PasteRail did not delete anything. Use Reset PasteRail Data from the menu bar if you want to initialize the local store and start again."
@@ -155,10 +153,84 @@ final class AppLanguageManager: ObservableObject {
         case (.korean, .inPasteQueue): "붙여넣기 큐에 있음"
         case (.english, .imagePreviewUnavailable): "Image preview unavailable"
         case (.korean, .imagePreviewUnavailable): "이미지 미리보기를 사용할 수 없음"
+        case (.english, .openShortcutStatus): "Open panel shortcut status"
+        case (.korean, .openShortcutStatus): "패널 단축키 상태"
+        case (.english, .settingsPrivacy): "Clipboard history stays on this Mac. PasteRail contains no network client, analytics, ads, or update service."
+        case (.korean, .settingsPrivacy): "클립보드 기록은 이 Mac에만 저장됩니다. PasteRail에는 네트워크 클라이언트, 분석, 광고, 업데이트 서비스가 없습니다."
+        case (.english, .captureHistoryLimit): "PasteRail stores up to 100 recent items. All current items are pinned, so the new item was not saved."
+        case (.korean, .captureHistoryLimit): "PasteRail은 최근 항목을 최대 100개까지 저장합니다. 현재 항목이 모두 고정되어 있어 새 항목을 저장하지 않았습니다."
+        case (.english, .captureStorageLimit): "PasteRail uses up to 500 MiB for clipboard files. Pinned items prevent enough space from being freed, so the new item was not saved."
+        case (.korean, .captureStorageLimit): "PasteRail은 클립보드 파일에 최대 500MiB를 사용합니다. 고정된 항목 때문에 공간을 충분히 확보하지 못해 새 항목을 저장하지 않았습니다."
+        case (.english, .captureFailed): "PasteRail could not safely store this clipboard item."
+        case (.korean, .captureFailed): "이 클립보드 항목을 안전하게 저장하지 못했습니다."
+        case (.english, .pinChangeFailed): "PasteRail could not save the pin change."
+        case (.korean, .pinChangeFailed): "고정 상태 변경을 저장하지 못했습니다."
+        case (.english, .clipboardItemLoadFailed): "PasteRail could not load this clipboard item."
+        case (.korean, .clipboardItemLoadFailed): "이 클립보드 항목을 불러오지 못했습니다."
+        case (.english, .queueSaveFailed): "The paste queue could not be saved."
+        case (.korean, .queueSaveFailed): "붙여넣기 큐를 저장하지 못했습니다."
+        case (.english, .queueItemLoadFailed): "PasteRail could not load this queue item. The queue position was preserved."
+        case (.korean, .queueItemLoadFailed): "이 큐 항목을 불러오지 못했습니다. 큐 위치는 그대로 유지했습니다."
+        case (.english, .queueAdvanceFailed): "Paste was sent, but queue progress could not be saved. The queue position was preserved."
+        case (.korean, .queueAdvanceFailed): "붙여넣기는 실행했지만 큐 진행 상태를 저장하지 못했습니다. 큐 위치는 그대로 유지했습니다."
+        case (.english, .queueChangeFailed): "The paste queue change could not be saved. The previous queue was kept."
+        case (.korean, .queueChangeFailed): "붙여넣기 큐 변경을 저장하지 못했습니다. 이전 큐를 유지했습니다."
+        case (.english, .pasteEventFailedRestored): "Paste shortcut delivery failed. The previous clipboard contents were restored."
+        case (.korean, .pasteEventFailedRestored): "붙여넣기 단축키를 보내지 못했습니다. 이전 클립보드 내용을 복원했습니다."
+        case (.english, .pasteEventFailedLost): "Paste shortcut delivery failed, and PasteRail could not restore the previous clipboard contents."
+        case (.korean, .pasteEventFailedLost): "붙여넣기 단축키를 보내지 못했고, 이전 클립보드 내용도 복원하지 못했습니다."
+        case (.english, .pasteWriteFailedRestored): "PasteRail could not write this item. The previous clipboard contents were restored."
+        case (.korean, .pasteWriteFailedRestored): "이 항목을 클립보드에 쓰지 못했습니다. 이전 클립보드 내용을 복원했습니다."
+        case (.english, .pasteWriteFailedLost): "PasteRail could not write this item or restore the previous clipboard contents."
+        case (.korean, .pasteWriteFailedLost): "이 항목을 클립보드에 쓰지 못했고, 이전 클립보드 내용도 복원하지 못했습니다."
+        case (.english, .pasteNoWritableRepresentation): "This item has no writable representation."
+        case (.korean, .pasteNoWritableRepresentation): "이 항목에는 붙여넣을 수 있는 형식이 없습니다."
+        case (.english, .pasteTargetUnavailable): "The previous application is no longer available."
+        case (.korean, .pasteTargetUnavailable): "붙여넣을 앱이 더 이상 실행 중이 아닙니다."
+        case (.english, .pasteTargetActivationFailed): "PasteRail could not restore the target application."
+        case (.korean, .pasteTargetActivationFailed): "붙여넣을 앱으로 다시 전환하지 못했습니다."
+        case (.english, .recoveryIndexRestored): "Clipboard history index was damaged. PasteRail preserved the encrypted file and restored the last backup."
+        case (.korean, .recoveryIndexRestored): "클립보드 기록 색인이 손상되었습니다. 암호화된 파일은 보존하고 마지막 백업을 복원했습니다."
+        case (.english, .recoveryPinnedStorageLimit): "Stored pinned clipboard records exceed the storage limit. PasteRail preserved them and will reject new records until space is available."
+        case (.korean, .recoveryPinnedStorageLimit): "고정된 클립보드 기록이 저장 한도를 넘었습니다. 기존 기록은 보존하며, 공간이 생길 때까지 새 기록은 저장하지 않습니다."
+        case (.english, .recoveryPinnedHistoryLimit): "More than 100 stored records are pinned. PasteRail preserved them and will reject new records until records are unpinned or removed."
+        case (.korean, .recoveryPinnedHistoryLimit): "고정된 기록이 100개를 넘었습니다. 기존 기록은 보존하며, 고정을 해제하거나 삭제할 때까지 새 기록은 저장하지 않습니다."
+        case (.english, .recoveryPlaintextCleanupPending): "Encrypted history is available, but secure plaintext cleanup could not be completed. It will be retried."
+        case (.korean, .recoveryPlaintextCleanupPending): "암호화된 기록은 사용할 수 있지만 평문 파일 정리를 끝내지 못했습니다. 다음 실행 때 다시 시도합니다."
         }
     }
 
-    enum TextKey {
+    func welcomeOpenShortcut(_ shortcutLabel: String) -> String {
+        switch language {
+        case .english: "Press \(shortcutLabel) to open clipboard history."
+        case .korean: "\(shortcutLabel)를 눌러 클립보드 기록을 여세요."
+        }
+    }
+
+    func message(for result: PasteResult) -> String? {
+        switch result {
+        case .eventSent: nil
+        case .eventFailedPreviousRestored: text(.pasteEventFailedRestored)
+        case .eventFailedPreviousLost: text(.pasteEventFailedLost)
+        case .newWriteFailedPreviousRestored: text(.pasteWriteFailedRestored)
+        case .newWriteFailedPreviousLost: text(.pasteWriteFailedLost)
+        case .preparationFailed(.noWritableRepresentation): text(.pasteNoWritableRepresentation)
+        case .preparationFailed(.accessibilityRequired): text(.accessibilityPasteRequired)
+        case .preparationFailed(.targetUnavailable): text(.pasteTargetUnavailable)
+        case .preparationFailed(.targetActivationFailed): text(.pasteTargetActivationFailed)
+        }
+    }
+
+    func message(for notice: StoreRecoveryNotice) -> String {
+        switch notice {
+        case .indexRestoredFromBackup: text(.recoveryIndexRestored)
+        case .pinnedRecordsExceedStorageLimit: text(.recoveryPinnedStorageLimit)
+        case .pinnedRecordsExceedHistoryLimit: text(.recoveryPinnedHistoryLimit)
+        case .plaintextCleanupPending: text(.recoveryPlaintextCleanupPending)
+        }
+    }
+
+    enum TextKey: CaseIterable {
         case openPasteRail
         case showWelcome
         case pasteNextQueueItem
@@ -170,7 +242,6 @@ final class AppLanguageManager: ObservableObject {
         case copyDiagnostics
         case quit
         case welcomeTitle
-        case welcomeOpenShortcut
         case welcomeQueueShortcut
         case welcomeLocalStorage
         case welcomeNotNotarized
@@ -215,5 +286,27 @@ final class AppLanguageManager: ObservableObject {
         case pinItemHint
         case inPasteQueue
         case imagePreviewUnavailable
+        case openShortcutStatus
+        case settingsPrivacy
+        case captureHistoryLimit
+        case captureStorageLimit
+        case captureFailed
+        case pinChangeFailed
+        case clipboardItemLoadFailed
+        case queueSaveFailed
+        case queueItemLoadFailed
+        case queueAdvanceFailed
+        case queueChangeFailed
+        case pasteEventFailedRestored
+        case pasteEventFailedLost
+        case pasteWriteFailedRestored
+        case pasteWriteFailedLost
+        case pasteNoWritableRepresentation
+        case pasteTargetUnavailable
+        case pasteTargetActivationFailed
+        case recoveryIndexRestored
+        case recoveryPinnedStorageLimit
+        case recoveryPinnedHistoryLimit
+        case recoveryPlaintextCleanupPending
     }
 }

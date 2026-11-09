@@ -7,13 +7,20 @@ struct PasteTarget: Equatable, Sendable {
     let bundleIdentifier: String?
 }
 
+enum PastePreparationFailure: Equatable, Sendable {
+    case noWritableRepresentation
+    case accessibilityRequired
+    case targetUnavailable
+    case targetActivationFailed
+}
+
 enum PasteResult: Equatable {
     case eventSent
     case eventFailedPreviousRestored
     case eventFailedPreviousLost
     case newWriteFailedPreviousRestored
     case newWriteFailedPreviousLost
-    case preparationFailed(String)
+    case preparationFailed(PastePreparationFailure)
 }
 
 enum PasteboardWriteResult: Equatable {
@@ -60,8 +67,15 @@ final class SystemPasteEnvironment: PasteEnvironment {
     }
 
     func activate(_ target: PasteTarget) -> Bool {
-        NSRunningApplication(processIdentifier: target.processIdentifier)?
-            .activate(options: [.activateIgnoringOtherApps]) == true
+        guard let application = NSRunningApplication(processIdentifier: target.processIdentifier) else { return false }
+        if #available(macOS 14.0, *) {
+            // macOS 14 ignores activateIgnoringOtherApps. Activation is cooperative:
+            // PasteRail yields to the target, then asks the target to activate.
+            NSApp.yieldActivation(to: application)
+            if application.activate(from: .current, options: []) { return true }
+        }
+        return application.activate(options: [.activateIgnoringOtherApps])
+            || NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier
     }
 
     func waitUntilFrontmost(_ target: PasteTarget, timeout: TimeInterval) async -> Bool {
@@ -181,7 +195,6 @@ final class NativePasteboardAccess: PasteboardAccess {
 
 @MainActor
 final class PasteService {
-    static let accessibilityRequiredMessage = "accessibility-required"
     private let environment: PasteEnvironment
     private let ownBundleIdentifier: String?
 
@@ -201,18 +214,18 @@ final class PasteService {
         dismissPanel: () -> Void
     ) async -> PasteResult {
         guard payloadIsWritable(payload, plainText: asPlainText) else {
-            return .preparationFailed("This item has no writable representation.")
+            return .preparationFailed(.noWritableRepresentation)
         }
         guard environment.accessibilityIsTrusted(prompt: true) else {
-            return .preparationFailed(Self.accessibilityRequiredMessage)
+            return .preparationFailed(.accessibilityRequired)
         }
         guard let target = validTarget(target), environment.isRunning(target) else {
-            return .preparationFailed("The previous application is no longer available.")
+            return .preparationFailed(.targetUnavailable)
         }
         dismissPanel()
         guard environment.activate(target),
               await environment.waitUntilFrontmost(target, timeout: 0.6) else {
-            return .preparationFailed("PasteRail could not restore the target application.")
+            return .preparationFailed(.targetActivationFailed)
         }
         switch environment.write(payload, plainText: asPlainText) {
         case .success:

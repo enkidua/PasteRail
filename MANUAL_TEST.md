@@ -7,7 +7,9 @@ app has an ad-hoc signature and is not Developer ID signed or notarized.
 
 - [ ] Start from a clean `~/Library/Application Support/PasteRail` directory and confirm the app launches directly.
 - [ ] Confirm the first launch shows the Welcome window.
-- [ ] Confirm the Welcome window says PasteRail is running in the menu bar and lists Command-Shift-V and Command-Option-P.
+- [ ] Confirm the Welcome window says PasteRail is running in the menu bar and names the selected open-panel shortcut and Command + Option + P.
+- [ ] Change the open-panel shortcut, choose `Show Welcome`, and confirm the Welcome window names the new shortcut.
+- [ ] On this ad-hoc test build, confirm the Welcome window says the build is not notarized. On a Developer ID release build, confirm that line is absent.
 - [ ] Click `Open Clipboard Panel` in the Welcome window and confirm the clipboard panel appears.
 - [ ] Relaunch after selecting `Don't show again` and confirm the setting is respected.
 - [ ] Confirm no macOS Keychain password or access approval prompt appears on first launch.
@@ -47,6 +49,7 @@ app has an ad-hoc signature and is not Developer ID signed or notarized.
 - [ ] Confirm image thumbnails appear without loading full originals in the list.
 - [ ] Scroll the single history list with a mouse wheel or trackpad.
 - [ ] Search history and exercise every type filter.
+- [ ] Open the PasteRail menu or the Welcome window, copy text in another app while it stays open, close it, and confirm the copy was recorded.
 
 ## Paste And Queue
 
@@ -56,6 +59,8 @@ app has an ad-hoc signature and is not Developer ID signed or notarized.
 - [ ] Paste rich text once as unformatted plain text.
 - [ ] Confirm FIFO queue order and that the queue advances only after target activation, clipboard write, and Command-V event posting succeed.
 - [ ] Queue two items and press Command-Option-P twice quickly. Confirm each item is pasted once, in order.
+- [ ] On macOS 14 or later, paste from the panel and confirm the previous app is frontmost again before the text appears.
+- [ ] Select `한국어`, quit the target app while the panel is open, paste an item, and confirm the failure message is shown in Korean.
 - [ ] Click a pin button and confirm pin state changes without pasting.
 - [ ] Click a queue selection button and confirm selection changes without pasting.
 

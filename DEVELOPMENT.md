@@ -236,7 +236,7 @@ Current status on June 17, 2026:
 - Temporary ad-hoc codesign verification: passed locally. This is not a Developer
   ID signature and is not notarization; Gatekeeper can still warn or block the app
   on other Macs.
-- Ordinary tests implemented: 88.
+- Ordinary tests implemented: 95.
 - Keychain integration tests implemented: 1 opt-in test.
 - Local tests executed: 0. Neither XCTest nor Swift Testing is present in the
   selected Command Line Tools installation.
@@ -244,7 +244,7 @@ Current status on June 17, 2026:
   first and fails clearly when the local toolchain cannot import it. Packaging
   scripts do not call this script by default, so a Command Line Tools-only machine
   can still build the app and create a manual-test DMG.
-- GitHub Actions ordinary test gate: requires at least 88 executed ordinary tests.
+- GitHub Actions ordinary test gate: requires at least 95 executed ordinary tests.
 - Latest GitHub Actions CI for commit `70f4187` executed 59 ordinary tests with
   59 passed, 0 failed, and 0 skipped, then built and verified the Universal app.
 - Keychain integration testing remains opt-in and separate.
@@ -334,9 +334,24 @@ Current status on June 17, 2026:
   passed. A control copy without queue serialization failed the new rapid-queue
   test by pasting the first entry twice. CI remains the authority for the real
   XCTest run.
+- November 9 CI correction: the first scratch shim treated `XCTestCase` as
+  main-actor isolated. Real XCTest test methods are nonisolated, so CI failed to
+  compile tests that call `HotKey.shouldHandleEvent` synchronously. The routing
+  check is now `nonisolated`, and the scratch shim matches XCTest's isolation.
+- November 9 UX and robustness changes: the Welcome window names the selected
+  open-panel shortcut instead of always Command-Shift-V. It shows the
+  not-notarized line only when the running app lacks a Developer ID signature; the
+  check evaluates Apple's Developer ID code requirement locally and makes no network
+  request. Clipboard polling runs in common run-loop modes, so a copy made while a
+  menu or modal alert is open is still captured. On macOS 14 and later, PasteRail
+  yields activation to the paste target and uses cooperative activation instead of
+  the deprecated ignoring-other-apps option. Model errors, paste failure reasons,
+  and store recovery notices now come from the English and Korean string table, and
+  the Settings window text is localized. Seven ordinary tests were added, for 95 in
+  total.
 
 CI now prints Xcode, Swift, and macOS SDK versions, reports executed, failed, and
-skipped test counts, and fails when fewer than 88 ordinary tests execute. It builds
+skipped test counts, and fails when fewer than 95 ordinary tests execute. It builds
 and verifies the Universal app, prints `lipo` and codesign results, and uploads only
 `PasteRail-0.1.0-universal.zip` as the
 `PasteRail-0.1.0-universal` artifact. Keychain integration tests run only through

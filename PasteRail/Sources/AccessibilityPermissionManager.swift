@@ -36,7 +36,7 @@ struct AccessibilityPermissionManager {
         alert.messageText = languageManager.text(.requestAccessibilityPermission)
         alert.informativeText = languageManager.text(.accessibilityHelp)
         alert.addButton(withTitle: languageManager.text(.ok))
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.activatePasteRail()
         alert.runModal()
     }
 }

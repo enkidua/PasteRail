@@ -9,14 +9,22 @@ struct PasteRailApp: App {
 
     var body: some Scene {
         Settings {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("PasteRail")
-                    .font(.title2.bold())
-                Text("Clipboard history stays on this Mac. PasteRail contains no network client, analytics, ads, or update service.")
-                    .frame(width: 420, alignment: .leading)
-            }
-            .padding(24)
+            SettingsView()
         }
+    }
+}
+
+private struct SettingsView: View {
+    @ObservedObject private var languageManager = AppLanguageManager.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("PasteRail")
+                .font(.title2.bold())
+            Text(languageManager.text(.settingsPrivacy))
+                .frame(width: 420, alignment: .leading)
+        }
+        .padding(24)
     }
 }
 
@@ -202,22 +210,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showWelcome(force: Bool) {
         let alert = NSAlert()
         alert.messageText = languageManager.text(.welcomeTitle)
-        var lines = [
-            languageManager.text(.welcomeOpenShortcut),
-            languageManager.text(.welcomeQueueShortcut),
-            languageManager.text(.welcomeLocalStorage),
-            languageManager.text(.welcomeNotNotarized),
-            "\(languageManager.language == .korean ? "현재 단축키" : "Current shortcut"): \(openShortcut.label)",
-            "\(languageManager.language == .korean ? "상태" : "Status"): \(HotKeyRegistrationResult.localizedStatus(openShortcutState.status, language: languageManager.language, shortcutLabel: openShortcut.label))"
-        ]
-        lines.append(contentsOf: hotKeyWarnings)
-        alert.informativeText = lines.joined(separator: "\n")
+        alert.informativeText = WelcomeContent.lines(
+            languageManager: languageManager,
+            openShortcut: openShortcutState,
+            queueStatus: queueShortcutStatus,
+            isDeveloperIDSigned: DistributionSignature.isDeveloperIDSigned
+        ).joined(separator: "\n")
         alert.addButton(withTitle: languageManager.text(.openClipboardPanel))
         alert.addButton(withTitle: languageManager.text(.quit))
         alert.addButton(withTitle: languageManager.text(.ok))
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title = languageManager.text(.dontShowAgain)
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.activatePasteRail()
         let response = alert.runModal()
         if alert.suppressionButton?.state == .on {
             UserDefaults.standard.set(true, forKey: Self.hideWelcomeDefaultsKey)
@@ -239,7 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.messageText = languageManager.text(.hotKeyWarningTitle)
         alert.informativeText = messages.joined(separator: "\n")
         alert.addButton(withTitle: languageManager.text(.ok))
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.activatePasteRail()
         alert.runModal()
     }
 
