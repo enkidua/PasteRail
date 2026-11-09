@@ -11,14 +11,27 @@ enum ClipStoreFileOperation: Equatable, Sendable {
     case beforeHistoryLimitPersist
 }
 
+/// Conditions found while opening the store. They are reported as values so the
+/// app can show them in the selected language.
+enum StoreRecoveryNotice: Equatable, Sendable {
+    case indexRestoredFromBackup
+    case pinnedRecordsExceedStorageLimit
+    case pinnedRecordsExceedHistoryLimit
+    case plaintextCleanupPending
+}
+
 actor ClipStore {
     static let maximumStoredRecords = 100
     static let maximumPayloadBytes = 20 * 1024 * 1024
     static let maximumStorageBytes: Int64 = 500 * 1024 * 1024
+    static let applicationSupportDirectoryName = "PasteRail"
+    /// Directory used by the first test build, which keyed its data with the Keychain.
+    /// Current builds never read it; Reset PasteRail Data removes it.
+    static let legacyApplicationSupportDirectoryName = "io.pasterail.PasteRail"
 
     private struct BootstrapResult {
         var snapshot: Snapshot
-        let recoveryMessage: String?
+        let recoveryNotices: [StoreRecoveryNotice]
         let indexBytes: Int64
     }
 
@@ -79,11 +92,11 @@ actor ClipStore {
     private var digestLookup: [String: UUID] = [:]
     private(set) var performanceMetrics: PerformanceMetrics
 
-    private(set) var recoveryMessage: String?
+    private(set) var recoveryNotices: [StoreRecoveryNotice]
 
     init(
         rootURL: URL? = nil,
-        keyStore: EncryptionKeyStore = KeychainEncryptionKeyStore(),
+        keyStore: EncryptionKeyStore? = nil,
         storageLimitBytes: Int64 = ClipStore.maximumStorageBytes,
         persistenceFailureInjector: (@Sendable () throws -> Void)? = nil,
         fileOperationInjector: (@Sendable (ClipStoreFileOperation) throws -> Void)? = nil
@@ -97,7 +110,7 @@ actor ClipStore {
             guard let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
                 throw StoreError.invalidContainer
             }
-            root = support.appendingPathComponent("io.pasterail.PasteRail", isDirectory: true)
+            root = support.appendingPathComponent(Self.applicationSupportDirectoryName, isDirectory: true)
         }
         let localPayloadsURL = root.appendingPathComponent("Payloads", isDirectory: true)
         let localImagesURL = root.appendingPathComponent("Images", isDirectory: true)
@@ -107,7 +120,7 @@ actor ClipStore {
         let localRecoveryURL = root.appendingPathComponent("Recovery", isDirectory: true)
         let localCrypto: CryptoStore
         do {
-            localCrypto = try CryptoStore(keyStore: keyStore)
+            localCrypto = try CryptoStore(keyStore: keyStore ?? Self.defaultKeyStore(rootURL: root))
         } catch {
             throw StoreError.encryptionUnavailable
         }
@@ -140,7 +153,7 @@ actor ClipStore {
         self.persistenceFailureInjector = persistenceFailureInjector
         self.fileOperationInjector = fileOperationInjector
         snapshot = bootstrap.snapshot
-        recoveryMessage = bootstrap.recoveryMessage
+        recoveryNotices = bootstrap.recoveryNotices
         digestLookup = Dictionary(
             bootstrap.snapshot.records.compactMap { record in record.digest.map { ($0, record.id) } },
             uniquingKeysWith: { first, _ in first }
@@ -150,6 +163,59 @@ actor ClipStore {
             indexBytes: bootstrap.indexBytes
         )
         try Self.applyPrivatePermissions(to: root)
+    }
+
+    static func defaultRootURL(fileManager: FileManager = .default) throws -> URL {
+        try applicationSupportURL(fileManager: fileManager)
+            .appendingPathComponent(applicationSupportDirectoryName, isDirectory: true)
+    }
+
+    static func legacyRootURL(fileManager: FileManager = .default) throws -> URL {
+        try applicationSupportURL(fileManager: fileManager)
+            .appendingPathComponent(legacyApplicationSupportDirectoryName, isDirectory: true)
+    }
+
+    private static func applicationSupportURL(fileManager: FileManager) throws -> URL {
+        guard let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw StoreError.invalidContainer
+        }
+        return support
+    }
+
+    static func defaultKeyStore(rootURL: URL) -> EncryptionKeyStore {
+        switch PasteRailKeyStoreMode.current {
+        case .keychain:
+            return KeychainEncryptionKeyStore()
+        case .local:
+            return LocalFileEncryptionKeyStore(rootURL: rootURL)
+        }
+    }
+
+    /// Deletes the current store and the first test build's directory.
+    static func resetApplicationData() throws {
+        try resetApplicationData(rootURL: defaultRootURL(), legacyRootURL: legacyRootURL())
+    }
+
+    /// Validates every target before deleting any of them, so an unexpected path
+    /// leaves all data in place.
+    static func resetApplicationData(rootURL: URL, legacyRootURL: URL? = nil) throws {
+        var targets = [try resetTarget(rootURL, expectedName: applicationSupportDirectoryName)]
+        if let legacyRootURL {
+            targets.append(try resetTarget(legacyRootURL, expectedName: legacyApplicationSupportDirectoryName))
+        }
+        for target in targets where FileManager.default.fileExists(atPath: target.path) {
+            try FileManager.default.removeItem(at: target)
+        }
+    }
+
+    private static func resetTarget(_ url: URL, expectedName: String) throws -> URL {
+        let target = url.standardizedFileURL
+        guard target.lastPathComponent == expectedName,
+              !target.path.isEmpty,
+              target.path != "/" else {
+            throw StoreError.invalidContainer
+        }
+        return target
     }
 
     private static func bootstrap(
@@ -167,7 +233,7 @@ actor ClipStore {
     ) throws -> BootstrapResult {
         let fileManager = FileManager.default
         var snapshot: Snapshot
-        var recoveryMessage: String?
+        var recoveryNotices: [StoreRecoveryNotice] = []
 
         if fileManager.fileExists(atPath: indexURL.path) {
             do {
@@ -187,7 +253,7 @@ actor ClipStore {
                     fileOperationInjector: fileOperationInjector
                 )
                 snapshot = recovered
-                recoveryMessage = "Clipboard history index was damaged. PasteRail preserved the encrypted file and restored the last backup."
+                recoveryNotices.append(.indexRestoredFromBackup)
             }
         } else {
             snapshot = try migratePlaintextStoreIfPresent(
@@ -245,13 +311,9 @@ actor ClipStore {
                 snapshot = limited
             }
         } catch StoreError.storageLimitReached {
-            recoveryMessage = [recoveryMessage, "Stored pinned clipboard records exceed the storage limit. PasteRail preserved them and will reject new records until space is available."]
-                .compactMap { $0 }
-                .joined(separator: "\n")
+            recoveryNotices.append(.pinnedRecordsExceedStorageLimit)
         } catch StoreError.historyLimitReached {
-            recoveryMessage = [recoveryMessage, "More than 100 stored records are pinned. PasteRail preserved them and will reject new records until records are unpinned or removed."]
-                .compactMap { $0 }
-                .joined(separator: "\n")
+            recoveryNotices.append(.pinnedRecordsExceedHistoryLimit)
         }
 
         do {
@@ -266,9 +328,7 @@ actor ClipStore {
                 fileOperationInjector: fileOperationInjector
             )
         } catch {
-            recoveryMessage = [recoveryMessage, "Encrypted history is available, but secure plaintext cleanup could not be completed. It will be retried."]
-                .compactMap { $0 }
-                .joined(separator: "\n")
+            recoveryNotices.append(.plaintextCleanupPending)
         }
         try? writeRecoveryCandidateList(
             snapshot: snapshot,
@@ -280,7 +340,7 @@ actor ClipStore {
 
         return BootstrapResult(
             snapshot: snapshot,
-            recoveryMessage: recoveryMessage,
+            recoveryNotices: recoveryNotices,
             indexBytes: Int64((try? indexURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
         )
     }
@@ -294,6 +354,9 @@ actor ClipStore {
         return try JSONDecoder.pasteRail.decode(ClipPayload.self, from: crypto.open(encrypted))
     }
 
+    /// Encrypts and writes the index after keeping the previous index as a backup.
+    /// Returns the encrypted index size.
+    @discardableResult
     private static func persistSnapshot(
         _ snapshot: Snapshot,
         indexURL: URL,
@@ -301,7 +364,7 @@ actor ClipStore {
         crypto: CryptoStore,
         persistenceFailureInjector: (@Sendable () throws -> Void)?,
         fileOperationInjector: (@Sendable (ClipStoreFileOperation) throws -> Void)?
-    ) throws {
+    ) throws -> Int64 {
         try persistenceFailureInjector?()
         let data = try crypto.seal(JSONEncoder.pasteRail.encode(snapshot))
         try replaceBackup(
@@ -312,6 +375,7 @@ actor ClipStore {
         )
         try fileOperationInjector?(.beforeIndexWrite)
         try writePrivate(data, to: indexURL)
+        return Int64(data.count)
     }
 
     private static func replaceBackup(
@@ -415,20 +479,18 @@ actor ClipStore {
         let id = UUID()
         let payloadName = "\(id.uuidString).json"
         let payloadURL = payloadsURL.appendingPathComponent(payloadName)
-        try atomicWrite(try crypto.seal(JSONEncoder.pasteRail.encode(payload)), to: payloadURL)
+        try Self.writePrivate(try crypto.seal(JSONEncoder.pasteRail.encode(payload)), to: payloadURL)
 
-        let imageName: String? = nil
         var thumbnailName: String?
         do {
             if kind == .image, let imageData = preferredImageData(in: payload) {
                 let decoded = NSImage(data: imageData)
                 guard let decoded else { throw StoreError.invalidImage }
                 thumbnailName = "\(id.uuidString).png"
-                try atomicWrite(try crypto.seal(pngData(from: decoded, maximumDimension: 160)), to: thumbnailsURL.appendingPathComponent(thumbnailName!))
+                try Self.writePrivate(try crypto.seal(pngData(from: decoded, maximumDimension: 160)), to: thumbnailsURL.appendingPathComponent(thumbnailName!))
             }
         } catch {
             try? FileManager.default.removeItem(at: payloadURL)
-            if let imageName { try? FileManager.default.removeItem(at: imagesURL.appendingPathComponent(imageName)) }
             if let thumbnailName { try? FileManager.default.removeItem(at: thumbnailsURL.appendingPathComponent(thumbnailName)) }
             throw error
         }
@@ -442,7 +504,7 @@ actor ClipStore {
             sourceAppName: sourceAppName,
             sourceBundleIdentifier: sourceBundleIdentifier,
             payloadFile: payloadName,
-            imageFile: imageName,
+            imageFile: nil,
             thumbnailFile: thumbnailName,
             digest: digest,
             isSensitive: false,
@@ -467,7 +529,6 @@ actor ClipStore {
             snapshot = previousSnapshot
             rebuildDigestLookup()
             try? FileManager.default.removeItem(at: payloadURL)
-            if let imageName { try? FileManager.default.removeItem(at: imagesURL.appendingPathComponent(imageName)) }
             if let thumbnailName { try? FileManager.default.removeItem(at: thumbnailsURL.appendingPathComponent(thumbnailName)) }
             throw error
         }
@@ -481,7 +542,6 @@ actor ClipStore {
             snapshot = previousSnapshot
             rebuildDigestLookup()
             try? FileManager.default.removeItem(at: payloadURL)
-            if let imageName { try? FileManager.default.removeItem(at: imagesURL.appendingPathComponent(imageName)) }
             if let thumbnailName { try? FileManager.default.removeItem(at: thumbnailsURL.appendingPathComponent(thumbnailName)) }
             throw error
         }
@@ -568,17 +628,14 @@ actor ClipStore {
     }
 
     private func persist() throws {
-        try persistenceFailureInjector?()
-        let encoded = try crypto.seal(JSONEncoder.pasteRail.encode(snapshot))
-        try Self.replaceBackup(
-            from: indexURL,
-            at: backupURL,
+        performanceMetrics.indexBytes = try Self.persistSnapshot(
+            snapshot,
+            indexURL: indexURL,
+            backupURL: backupURL,
             crypto: crypto,
+            persistenceFailureInjector: persistenceFailureInjector,
             fileOperationInjector: fileOperationInjector
         )
-        try fileOperationInjector?(.beforeIndexWrite)
-        try atomicWrite(encoded, to: indexURL)
-        performanceMetrics.indexBytes = Int64(encoded.count)
     }
 
     private func mutateQueue(_ mutation: () -> Void) throws {
@@ -592,11 +649,6 @@ actor ClipStore {
             snapshot.queueIndex = previousIndex
             throw error
         }
-    }
-
-    private func atomicWrite(_ data: Data, to url: URL) throws {
-        try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     private static func applyLimits(

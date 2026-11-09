@@ -71,14 +71,31 @@ ad-hoc test DMG and exits unsuccessfully. That result is not a release build.
 
 ## Keychain Compatibility
 
-Do not change these production identifiers:
+GitHub beta builds do not use Keychain for PasteRail clipboard-history encryption
+keys by default. They store the AES-GCM key in:
+
+`~/Library/Application Support/PasteRail/Keys/storage.key`
+
+This improves first-launch usability for unsigned GitHub distribution, but it is a
+lower security level than Keychain storage. Recommend FileVault and a protected Mac
+user account. The app still contains the legacy Keychain implementation for
+explicit opt-in testing:
+
+```sh
+PASTERAIL_KEYSTORE=keychain open PasteRail.app
+```
+
+Do not change these legacy optional Keychain identifiers:
 
 - Service: `io.pasterail.PasteRail.storage`
 - Account: `primary-aes-gcm-key`
 
-Reinstalling or updating an app signed by the same Developer ID team should reuse
-the existing Keychain item. Moving from an older ad-hoc build to a Developer ID
-build can cause macOS to request one-time Keychain approval because the signing
-requirement changed. Test this transition before public distribution. A denied
-Keychain request must not cause PasteRail to overwrite the key or delete encrypted
-history.
+Existing records from older Keychain-backed test builds may not open in the local
+key-file build. PasteRail must preserve the files and show a recoverable reset
+message rather than overwrite keys or delete encrypted history. PasteRail does not
+automatically delete legacy Keychain items; remove them manually with Keychain
+Access or:
+
+```sh
+security delete-generic-password -s io.pasterail.PasteRail.storage -a primary-aes-gcm-key
+```

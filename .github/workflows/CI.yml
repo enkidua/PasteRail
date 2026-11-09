@@ -40,8 +40,8 @@ jobs:
           echo "Passed tests: $passed"
           echo "Failed tests: $failures"
           echo "Skipped tests: $skipped"
-          if (( executed < 67 )); then
-            echo "Expected at least 67 ordinary tests, but only $executed executed."
+          if (( executed < 97 )); then
+            echo "Expected at least 97 ordinary tests, but only $executed executed."
             exit 1
           fi
           if (( failures > 0 )); then exit 1; fi
@@ -54,10 +54,10 @@ jobs:
       - name: Verify application
         run: |
           binary=".build/universal/PasteRail.app/Contents/MacOS/PasteRail"
-          lipo "$binary" -verify_arch arm64 x86_64
+          for arch in arm64 x86_64; do lipo "$binary" -verify_arch "$arch"; done
           lipo -info "$binary"
           codesign --verify --deep --strict --verbose=2 ".build/universal/PasteRail.app"
-          test "$(defaults read "$PWD/.build/universal/PasteRail.app/Contents/Info" CFBundleIdentifier)" = "io.pasterail.PasteRail"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' ".build/universal/PasteRail.app/Contents/Info.plist")" = "io.pasterail.PasteRail"
       - name: Package Universal app
         run: ./Scripts/package-universal.sh 0.1.0 --reuse-build
       - name: Upload Universal app

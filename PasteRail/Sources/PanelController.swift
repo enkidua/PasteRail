@@ -24,8 +24,8 @@ final class PanelController: NSWindowController, NSWindowDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         super.init(window: panel)
         panel.delegate = self
-        panel.contentViewController = NSHostingController(rootView: PanelView(model: model) {
-            panel.orderOut(nil)
+        panel.contentViewController = NSHostingController(rootView: PanelView(model: model) { [weak panel] in
+            panel?.orderOut(nil)
         })
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handleKeyEvent(event) == true ? nil : event
@@ -50,7 +50,7 @@ final class PanelController: NSWindowController, NSWindowDelegate {
         }
         model.rememberTargetApplication()
         restorePosition(window)
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.activatePasteRail()
         window.makeKeyAndOrderFront(nil)
     }
 
@@ -107,9 +107,6 @@ final class PanelController: NSWindowController, NSWindowDelegate {
         case 119:
             if textFieldIsEditing { return false }
             model.moveFocus(.last)
-        case 123, 124:
-            if textFieldIsEditing { return false }
-            return false
         case 36, 76:
             model.pasteFocused(
                 plainText: event.modifierFlags.contains(.shift),

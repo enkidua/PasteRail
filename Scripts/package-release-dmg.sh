@@ -28,7 +28,7 @@ fi
 rm -f "$DMG" "$APP_ZIP"
 "$ROOT/Scripts/build-universal.sh"
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "$BUNDLE_ID"
-lipo "$APP/Contents/MacOS/PasteRail" -verify_arch arm64 x86_64
+for arch in arm64 x86_64; do lipo "$APP/Contents/MacOS/PasteRail" -verify_arch "$arch"; done
 
 codesign --force --deep --strict \
   --sign "$DEVELOPER_ID_APPLICATION" \

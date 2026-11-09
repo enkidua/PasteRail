@@ -8,8 +8,19 @@ protocol EncryptionKeyStore: Sendable {
 
 enum CryptoStoreError: Error {
     case keychain(OSStatus)
+    case localKeyUnavailable
     case invalidKey
     case authenticationFailed
+}
+
+enum PasteRailKeyStoreMode: String {
+    case local
+    case keychain
+
+    static var current: PasteRailKeyStoreMode {
+        let raw = ProcessInfo.processInfo.environment["PASTERAIL_KEYSTORE"]?.lowercased()
+        return PasteRailKeyStoreMode(rawValue: raw ?? "") ?? .local
+    }
 }
 
 struct KeychainEncryptionKeyStore: EncryptionKeyStore {
@@ -75,6 +86,44 @@ struct KeychainEncryptionKeyStore: EncryptionKeyStore {
         guard status == errSecSuccess else { return .status(status) }
         guard let data = item as? Data, data.count == 32 else { return .status(errSecDecode) }
         return .key(data)
+    }
+}
+
+struct LocalFileEncryptionKeyStore: EncryptionKeyStore {
+    let keyURL: URL
+
+    init(rootURL: URL) {
+        keyURL = rootURL
+            .appendingPathComponent("Keys", isDirectory: true)
+            .appendingPathComponent("storage.key")
+    }
+
+    init(keyURL: URL) {
+        self.keyURL = keyURL
+    }
+
+    func loadOrCreateKey() throws -> Data {
+        let fileManager = FileManager.default
+        let directory = keyURL.deletingLastPathComponent()
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+
+        if fileManager.fileExists(atPath: keyURL.path) {
+            let data = try Data(contentsOf: keyURL)
+            guard data.count == 32 else { throw CryptoStoreError.invalidKey }
+            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: keyURL.path)
+            return data
+        }
+
+        var bytes = [UInt8](repeating: 0, count: 32)
+        let randomStatus = bytes.withUnsafeMutableBytes {
+            SecRandomCopyBytes(kSecRandomDefault, $0.count, $0.baseAddress!)
+        }
+        guard randomStatus == errSecSuccess else { throw CryptoStoreError.localKeyUnavailable }
+        let data = Data(bytes)
+        try data.write(to: keyURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: keyURL.path)
+        return data
     }
 }
 

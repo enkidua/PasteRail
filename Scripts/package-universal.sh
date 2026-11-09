@@ -19,7 +19,7 @@ else
   "$ROOT/Scripts/build-universal.sh"
 fi
 codesign --verify --deep --strict --verbose=2 "$APP"
-lipo "$APP/Contents/MacOS/PasteRail" -verify_arch arm64 x86_64
+for arch in arm64 x86_64; do lipo "$APP/Contents/MacOS/PasteRail" -verify_arch "$arch"; done
 lipo -info "$APP/Contents/MacOS/PasteRail"
 
 rm -f "$ARCHIVE"

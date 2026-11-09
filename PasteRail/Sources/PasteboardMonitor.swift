@@ -40,10 +40,14 @@ final class PasteboardMonitor {
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
             Task { @MainActor in self?.handleActivation(Self.sourceApplication(app)) }
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
+        // Common modes keep polling while a menu is open or a modal alert such as the
+        // Welcome dialog is running; the default mode alone pauses during both.
+        let timer = Timer(timeInterval: 0.35, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
         }
-        timer?.tolerance = 0.08
+        timer.tolerance = 0.08
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     func stop() {
